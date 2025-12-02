@@ -1,14 +1,61 @@
 import streamlit as st
 import pandas as pd
-import sys
 import os
+import sys
 
-# Add current directory to path for imports
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add the current directory to path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
 
-from models import MatchPredictor, TeamProfile
-from utils import get_available_leagues, load_league_data, PredictionUtils
-from betting_advisor import BettingAdvisor
+# Try to import from local modules - use try/except for debugging
+try:
+    from models import MatchPredictor, TeamProfile
+    from betting_advisor import BettingAdvisor
+    import config
+    import utils
+    
+    st.success("✅ Successfully imported all modules")
+except ImportError as e:
+    st.error(f"❌ Import error: {e}")
+    st.info("Make sure all files are in the same directory: models.py, config.py, utils.py, betting_advisor.py")
+    
+    # Fallback: define minimal versions
+    st.warning("⚠️ Using fallback implementations...")
+    
+    # Define minimal versions if imports fail
+    class TeamProfile:
+        def __init__(self, data_dict, is_home=True):
+            self.name = data_dict['Team']
+            self.is_home = is_home
+            self.matches = int(data_dict['Matches'])
+            self.wins = int(data_dict['Wins'])
+            self.draws = int(data_dict['Draws'])
+            self.losses = int(data_dict['Losses'])
+            self.goals_for = int(data_dict['Goals'])
+            self.goals_against = int(data_dict['Goals_Against'])
+            self.points = int(data_dict['Points'])
+            self.xg = float(data_dict['xG'])
+            self.xga = float(data_dict['xGA'])
+            self.xpts = float(data_dict['xPTS'])
+            
+            # Per-game averages
+            self.goals_pg = self.goals_for / self.matches if self.matches > 0 else 0
+            self.goals_against_pg = self.goals_against / self.matches if self.matches > 0 else 0
+            self.xg_pg = self.xg / self.matches if self.matches > 0 else 0
+            self.xga_pg = self.xga / self.matches if self.matches > 0 else 0
+            
+            # Default values for missing columns
+            self.last5_wins = int(data_dict.get('Last5_Home_Wins', 0)) if is_home else int(data_dict.get('Last5_Away_Wins', 0))
+            self.last5_draws = int(data_dict.get('Last5_Home_Draws', 0)) if is_home else int(data_dict.get('Last5_Away_Draws', 0))
+            self.last5_losses = int(data_dict.get('Last5_Home_Losses', 0)) if is_home else int(data_dict.get('Last5_Away_Losses', 0))
+            self.last5_gf = int(data_dict.get('Last5_Home_GF', 0)) if is_home else int(data_dict.get('Last5_Away_GF', 0))
+            self.last5_ga = int(data_dict.get('Last5_Home_GA', 0)) if is_home else int(data_dict.get('Last5_Away_GA', 0))
+            self.last5_pts = int(data_dict.get('Last5_Home_PTS', 0)) if is_home else int(data_dict.get('Last5_Away_PTS', 0))
+            
+            # Flags
+            self.has_attack_crisis = False
+            self.has_defense_crisis = False
+            self.form_momentum = 0.0
 
 def main():
     st.set_page_config(
@@ -20,16 +67,86 @@ def main():
     st.title("⚽ PHANTOM PREDICTION SYSTEM v2.3")
     st.markdown("**Intelligent Football Analytics • Evidence-Based Predictions • Risk-Managed Betting**")
     
-    # Initialize components
-    betting_advisor = BettingAdvisor()
-    utils = PredictionUtils()
+    # Initialize betting advisor
+    try:
+        betting_advisor = BettingAdvisor()
+    except NameError:
+        # Fallback betting advisor
+        class BettingAdvisor:
+            @staticmethod
+            def get_stake_recommendation(confidence):
+                if confidence >= 75:
+                    return {"units": 1.0, "color": "🟢", "risk": "Medium"}
+                elif 65 <= confidence < 75:
+                    return {"units": 0.75, "color": "🟢", "risk": "Medium"}
+                elif 55 <= confidence < 65:
+                    return {"units": 0.5, "color": "🟡", "risk": "Low-Medium"}
+                elif 45 <= confidence < 55:
+                    return {"units": 0.25, "color": "🟠", "risk": "Low"}
+                else:
+                    return {"units": 0, "color": "⚪", "risk": "AVOID"}
+            
+            @staticmethod
+            def generate_advice(predictions):
+                advice = {
+                    "strong_plays": [],
+                    "moderate_plays": [],
+                    "avoid": [],
+                    "summary": ""
+                }
+                
+                for pred in predictions:
+                    stake_info = BettingAdvisor.get_stake_recommendation(pred['confidence'])
+                    
+                    if stake_info['units'] >= 0.75:
+                        advice['strong_plays'].append({
+                            "market": pred['type'],
+                            "selection": pred['selection'],
+                            "confidence": pred['confidence'],
+                            "stake": stake_info
+                        })
+                    elif stake_info['units'] >= 0.5:
+                        advice['moderate_plays'].append({
+                            "market": pred['type'],
+                            "selection": pred['selection'],
+                            "confidence": pred['confidence'],
+                            "stake": stake_info
+                        })
+                    elif stake_info['units'] > 0:
+                        advice['moderate_plays'].append({
+                            "market": pred['type'],
+                            "selection": pred['selection'],
+                            "confidence": pred['confidence'],
+                            "stake": stake_info
+                        })
+                    else:
+                        advice['avoid'].append(pred['type'])
+                
+                if advice['strong_plays']:
+                    advice['summary'] = f"Strong betting opportunities found ({len(advice['strong_plays'])} markets)"
+                elif advice['moderate_plays']:
+                    advice['summary'] = f"Moderate betting opportunities ({len(advice['moderate_plays'])} markets)"
+                else:
+                    advice['summary'] = "No strong betting opportunities - consider avoiding"
+                
+                return advice
+        
+        betting_advisor = BettingAdvisor()
     
     # Sidebar
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        # League selection
-        available_leagues = get_available_leagues()
+        # Get available leagues
+        data_dir = "data"
+        available_leagues = {}
+        
+        if os.path.exists(data_dir):
+            for file in os.listdir(data_dir):
+                if file.endswith("_home_away.csv"):
+                    league_name = file.replace("_home_away.csv", "")
+                    available_leagues[league_name] = os.path.join(data_dir, file)
+        
         if not available_leagues:
             st.error("❌ No data files found in 'data' folder!")
             st.info("Please ensure CSV files are in the 'data' folder:")
@@ -54,17 +171,21 @@ def main():
         if st.button("📥 Load League Data", type="primary"):
             with st.spinner(f"Loading {selected_league_key}..."):
                 try:
-                    home_df, away_df = load_league_data(selected_league_key)
+                    file_path = available_leagues[selected_league_key]
+                    df = pd.read_csv(file_path)
+                    df.columns = [col.strip() for col in df.columns]
                     
-                    if home_df is not None and away_df is not None:
-                        # Store in session state
-                        st.session_state.home_df = home_df
-                        st.session_state.away_df = away_df
-                        st.session_state.league_name = selected_league_key
-                        st.session_state.league_loaded = True
-                        
-                        st.success(f"✅ Loaded {selected_league_key}")
-                        
+                    home_df = df[df['Home_Away'] == 'Home']
+                    away_df = df[df['Home_Away'] == 'Away']
+                    
+                    # Store in session state
+                    st.session_state.home_df = home_df
+                    st.session_state.away_df = away_df
+                    st.session_state.league_name = selected_league_key
+                    st.session_state.league_loaded = True
+                    
+                    st.success(f"✅ Loaded {selected_league_key}")
+                    
                 except Exception as e:
                     st.error(f"❌ Error loading data: {str(e)}")
         
@@ -146,7 +267,8 @@ def main():
         if st.button("🔮 Generate Prediction", type="primary", use_container_width=True):
             generate_prediction(
                 selected_home, selected_away, 
-                st.session_state.league_name
+                st.session_state.league_name,
+                betting_advisor
             )
         
         # Methodology button
@@ -191,7 +313,7 @@ def display_team_stats(data, is_home=True):
                 st.write(f"GF: {int(data['Last5_Away_GF'])} GA: {int(data['Last5_Away_GA'])}")
                 st.write(f"Pts: {int(data['Last5_Away_PTS'])}/15")
 
-def generate_prediction(home_team, away_team, league_name):
+def generate_prediction(home_team, away_team, league_name, betting_advisor):
     """Generate and display prediction"""
     
     with st.spinner("🔬 Running advanced analysis..."):
@@ -208,15 +330,22 @@ def generate_prediction(home_team, away_team, league_name):
             home_profile = TeamProfile(home_data, is_home=True)
             away_profile = TeamProfile(away_data, is_home=False)
             
-            # Create predictor
-            predictor = MatchPredictor(league_name)
-            
-            # Generate prediction
-            result = predictor.predict(home_profile, away_profile)
+            # Create predictor - try to import MatchPredictor, fallback if needed
+            try:
+                from models import MatchPredictor
+                predictor = MatchPredictor(league_name)
+            except ImportError:
+                # Fallback simple predictor
+                result = fallback_prediction(home_profile, away_profile, league_name)
+                predictor = None
+            else:
+                # Generate prediction using MatchPredictor
+                result = predictor.predict(home_profile, away_profile)
             
             # Add team names
             result['analysis']['home_team'] = home_team
             result['analysis']['away_team'] = away_team
+            result['analysis']['league'] = league_name.replace('_', ' ').title()
             
             # Generate betting advice
             advice = betting_advisor.generate_advice(result['predictions'])
@@ -230,6 +359,96 @@ def generate_prediction(home_team, away_team, league_name):
             
         except Exception as e:
             st.error(f"❌ Prediction error: {str(e)}")
+            import traceback
+            st.error(f"Full traceback: {traceback.format_exc()}")
+
+def fallback_prediction(home_profile, away_profile, league_name):
+    """Fallback prediction if MatchPredictor fails"""
+    import math
+    
+    # Simple quality calculation
+    home_quality = (home_profile.xg_pg * 0.7) + (max(0.4, 2.0 - home_profile.goals_against_pg) * 0.3)
+    away_quality = (away_profile.xg_pg * 0.7) + (max(0.4, 2.0 - away_profile.goals_against_pg) * 0.3)
+    
+    # Simple xG calculation
+    home_xg = (home_quality + (2.0 - away_quality)) / 2 * 1.35
+    away_xg = (away_quality + (2.0 - home_quality)) / 2 * 0.9
+    total_xg = home_xg + away_xg
+    
+    # Winner prediction
+    quality_diff = home_quality - away_quality
+    if quality_diff > 0.45:
+        winner_sel = "Home Win"
+        winner_conf = min(85, 55 + abs(quality_diff) * 20)
+    elif quality_diff < -0.45:
+        winner_sel = "Away Win"
+        winner_conf = min(85, 55 + abs(quality_diff) * 20)
+    else:
+        winner_sel = "Draw"
+        winner_conf = 50
+    
+    # Total goals
+    if total_xg > 2.8:
+        total_sel = "Over 2.5 Goals"
+        total_conf = min(85, 50 + (total_xg - 2.8) * 25)
+    elif total_xg < 2.6:
+        total_sel = "Under 2.5 Goals"
+        total_conf = min(85, 50 + (2.6 - total_xg) * 25)
+    else:
+        total_sel = "Avoid Total Goals"
+        total_conf = 50
+    
+    # BTTS
+    home_score_prob = 1 - math.exp(-home_xg)
+    away_score_prob = 1 - math.exp(-away_xg)
+    btts_raw = home_score_prob * away_score_prob * 100
+    
+    if btts_raw > 56:
+        btts_sel = "Yes"
+        btts_conf = min(85, btts_raw)
+    elif btts_raw < 46:
+        btts_sel = "No"
+        btts_conf = min(85, 100 - btts_raw)
+    else:
+        btts_sel = "Avoid BTTS"
+        btts_conf = 50
+    
+    return {
+        "analysis": {
+            "quality_ratings": {
+                "home": round(home_quality, 2),
+                "away": round(away_quality, 2)
+            },
+            "expected_goals": {
+                "home": round(home_xg, 2),
+                "away": round(away_xg, 2),
+                "total": round(total_xg, 2)
+            },
+            "team_flags": {
+                "home_attack_crisis": False,
+                "away_attack_crisis": False,
+                "home_defense_crisis": False,
+                "away_defense_crisis": False
+            }
+        },
+        "predictions": [
+            {
+                "type": "Match Winner",
+                "selection": winner_sel,
+                "confidence": round(winner_conf, 1)
+            },
+            {
+                "type": "Total Goals",
+                "selection": total_sel,
+                "confidence": round(total_conf, 1)
+            },
+            {
+                "type": "BTTS",
+                "selection": btts_sel,
+                "confidence": round(btts_conf, 1)
+            }
+        ]
+    }
 
 def display_prediction_results(result, betting_advisor):
     """Display prediction results"""
@@ -278,20 +497,20 @@ def display_prediction_results(result, betting_advisor):
     
     # Team flags
     if result['analysis']['team_flags']:
-        st.markdown("### ⚠️ Team Alerts")
-        
         flags = result['analysis']['team_flags']
-        alert_cols = st.columns(4)
-        
-        idx = 0
-        for flag_name, flag_value in flags.items():
-            if flag_value:
-                team_type = "Home" if "home" in flag_name else "Away"
-                flag_type = "Attack Crisis" if "attack" in flag_name else "Defense Crisis"
-                
-                with alert_cols[idx % 4]:
-                    st.warning(f"**{team_type} {flag_type}**")
-                idx += 1
+        if any(flags.values()):
+            st.markdown("### ⚠️ Team Alerts")
+            
+            alert_cols = st.columns(4)
+            idx = 0
+            for flag_name, flag_value in flags.items():
+                if flag_value:
+                    team_type = "Home" if "home" in flag_name else "Away"
+                    flag_type = "Attack Crisis" if "attack" in flag_name else "Defense Crisis"
+                    
+                    with alert_cols[idx % 4]:
+                        st.warning(f"**{team_type} {flag_type}**")
+                    idx += 1
     
     # Predictions
     st.markdown("### 🎯 Model Predictions")
@@ -318,37 +537,6 @@ def display_prediction_results(result, betting_advisor):
                 st.metric("Risk Level", stake_info['risk'])
             with col3:
                 st.metric("Color Code", stake_info['color'])
-            
-            # Additional context based on prediction type
-            if pred_type == "Match Winner":
-                if "Draw" in selection:
-                    st.info("📊 Close match expected with minimal quality difference")
-                elif "Home" in selection:
-                    st.info("🏠 Home advantage and quality edge")
-                else:
-                    st.info("✈️ Away team superior form/quality")
-            
-            elif pred_type == "Total Goals":
-                total_xg = result['analysis']['expected_goals']['total']
-                league_name = result['analysis']['league']
-                
-                # Get league average
-                league_avg = None
-                for config in LEAGUE_CONFIGS.values():
-                    if config['name'] == league_name:
-                        league_avg = config['avg_goals']
-                        break
-                
-                if league_avg:
-                    if total_xg > league_avg + 0.3:
-                        st.info(f"⚡ High-scoring expected ({total_xg:.2f} vs league avg {league_avg:.2f})")
-                    elif total_xg < league_avg - 0.3:
-                        st.info(f"🛡️ Defensive battle expected ({total_xg:.2f} vs league avg {league_avg:.2f})")
-                    else:
-                        st.info(f"📈 Average scoring expected ({total_xg:.2f} vs league avg {league_avg:.2f})")
-            
-            elif pred_type == "BTTS":
-                st.info(f"📊 BTTS probability calculated with clean sheet risk adjustment")
     
     # Betting advice
     st.markdown("### 💰 Betting Recommendations")
