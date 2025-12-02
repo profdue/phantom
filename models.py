@@ -16,9 +16,13 @@ class AdvancedUnderstatPredictor:
     def load_team_profile(self, team_name: str, csv_row: Dict):
         """Extract team-specific profile from CSV data"""
         if team_name not in self.team_profiles:
+            # Handle column name variations from your CSV
+            goals_conceded_pg = csv_row.get('Team_Goals_Conceded_PG', 
+                                           csv_row.get('goals_conceded_pg', 1.3))
+            
             self.team_profiles[team_name] = {
                 'avg_total_goals': csv_row.get('Team_Avg_Total_Goals', 2.7),
-                'goals_conceded_pg': csv_row.get('Team_Goals_Conceded_PG', 1.3),
+                'goals_conceded_pg': goals_conceded_pg,
                 'home_away_goal_diff': csv_row.get('Home_Away_Goal_Diff', 0.0),
                 'offensive_rating': csv_row.get('Goals', 0) / max(1, csv_row.get('Matches', 1)),
                 'defensive_rating': 2.0 - (csv_row.get('Goals_Against', 0) / max(1, csv_row.get('Matches', 1)))
@@ -158,7 +162,7 @@ class AdvancedUnderstatPredictor:
                 "probabilities": {
                     "over_25": over_confidence,
                     "btts_raw": btts_raw_prob,
-                    "btts_adjust_note": btts_note if 'btts_note' in locals() else ""
+                    "btts_adjust_note": btts_note
                 },
                 "home_momentum": 1.0 + min(0.15, max(-0.15, home_data["points"] / (games_played * 3) - 0.5)),
                 "away_momentum": 1.0 + min(0.15, max(-0.15, away_data["points"] / (games_played * 3) - 0.5)),
