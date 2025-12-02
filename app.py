@@ -86,7 +86,7 @@ def main():
             home_teams_data['Team'] == home_team
         ].iloc[0]
         
-        # Convert to dictionary for model
+        # Convert to dictionary for model (include all CSV columns)
         home_data = {
             "points": int(home_team_data['Points']),
             "goals_scored": int(home_team_data['Goals']),
@@ -96,9 +96,14 @@ def main():
             "xPTS": float(home_team_data['xPTS']),
             "Matches": int(home_team_data['Matches']),
             "Wins": int(home_team_data['Wins']),
+            "Draws": int(home_team_data['Draws']),
             "Losses": int(home_team_data['Losses']),
             "Goals": int(home_team_data['Goals']),
-            "Goals_Against": int(home_team_data['Goals_Against'])
+            "Goals_Against": int(home_team_data['Goals_Against']),
+            # Include team profile columns
+            "Team_Avg_Total_Goals": float(home_team_data.get('Team_Avg_Total_Goals', 2.7)),
+            "Team_Goals_Conceded_PG": float(home_team_data.get('Team_Goals_Conceded_PG', home_team_data.get('goals_conceded_pg', 1.3))),
+            "Home_Away_Goal_Diff": float(home_team_data.get('Home_Away_Goal_Diff', 0.0))
         }
         
         # Display stats
@@ -107,6 +112,10 @@ def main():
         st.write(f"**Goals:** {int(home_team_data['Goals'])}F, {int(home_team_data['Goals_Against'])}A")
         st.write(f"**xG:** {float(home_team_data['xG']):.2f}, **xGA:** {float(home_team_data['xGA']):.2f}")
         st.write(f"**Points:** {int(home_team_data['Points'])}, **xPTS:** {float(home_team_data['xPTS']):.2f}")
+        
+        # Show team profile data if available
+        if 'Team_Avg_Total_Goals' in home_team_data:
+            st.caption(f"📊 Team Profile: Avg {home_team_data['Team_Avg_Total_Goals']:.1f} total goals, concedes {home_team_data.get('Team_Goals_Conceded_PG', home_team_data.get('goals_conceded_pg', 1.3)):.1f} PG")
     
     with col2:
         st.markdown("### ✈️ Away Team")
@@ -126,7 +135,7 @@ def main():
             away_teams_data['Team'] == away_team
         ].iloc[0]
         
-        # Convert to dictionary for model
+        # Convert to dictionary for model (include all CSV columns)
         away_data = {
             "points": int(away_team_data['Points']),
             "goals_scored": int(away_team_data['Goals']),
@@ -136,9 +145,14 @@ def main():
             "xPTS": float(away_team_data['xPTS']),
             "Matches": int(away_team_data['Matches']),
             "Wins": int(away_team_data['Wins']),
+            "Draws": int(away_team_data['Draws']),
             "Losses": int(away_team_data['Losses']),
             "Goals": int(away_team_data['Goals']),
-            "Goals_Against": int(away_team_data['Goals_Against'])
+            "Goals_Against": int(away_team_data['Goals_Against']),
+            # Include team profile columns
+            "Team_Avg_Total_Goals": float(away_team_data.get('Team_Avg_Total_Goals', 2.7)),
+            "Team_Goals_Conceded_PG": float(away_team_data.get('Team_Goals_Conceded_PG', away_team_data.get('goals_conceded_pg', 1.3))),
+            "Home_Away_Goal_Diff": float(away_team_data.get('Home_Away_Goal_Diff', 0.0))
         }
         
         # Display stats
@@ -147,6 +161,10 @@ def main():
         st.write(f"**Goals:** {int(away_team_data['Goals'])}F, {int(away_team_data['Goals_Against'])}A")
         st.write(f"**xG:** {float(away_team_data['xG']):.2f}, **xGA:** {float(away_team_data['xGA']):.2f}")
         st.write(f"**Points:** {int(away_team_data['Points'])}, **xPTS:** {float(away_team_data['xPTS']):.2f}")
+        
+        # Show team profile data if available
+        if 'Team_Avg_Total_Goals' in away_team_data:
+            st.caption(f"📊 Team Profile: Avg {away_team_data['Team_Avg_Total_Goals']:.1f} total goals, concedes {away_team_data.get('Team_Goals_Conceded_PG', away_team_data.get('goals_conceded_pg', 1.3)):.1f} PG")
     
     games_played = min(int(home_team_data['Matches']), int(away_team_data['Matches']))
     
