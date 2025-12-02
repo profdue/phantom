@@ -3,8 +3,7 @@ from typing import Dict, List, Tuple
 from utils import (
     calculate_btts_poisson_probability,
     calculate_btts_decision,
-    get_match_context,
-    get_league_adjustments,
+    get_league_settings,  # FIXED IMPORT
     calculate_team_specific_adjustments
 )
 
@@ -34,8 +33,16 @@ class AdvancedUnderstatPredictor:
     
     def calculate_advanced_analysis(self, home_data: Dict, away_data: Dict, 
                                    home_team: str, away_team: str, 
-                                   games_played: int = 12) -> Dict:
-        """FIXED: Advanced xG-based football predictor"""
+                                   games_played: int = 12,
+                                   league_name: str = 'Average') -> Dict:
+        """Advanced xG-based football predictor with LEAGUE-SPECIFIC adjustments"""
+        
+        # Get league settings
+        league_settings = get_league_settings(league_name)
+        league_avg_goals = league_settings['avg_goals']
+        league_over_threshold = league_settings['over_threshold']
+        league_under_threshold = league_settings['under_threshold']
+        league_home_advantage = league_settings['home_advantage']
         
         # Load team profiles
         self.load_team_profile(home_team, home_data)
@@ -44,25 +51,22 @@ class AdvancedUnderstatPredictor:
         home_profile = self.team_profiles[home_team]
         away_profile = self.team_profiles[away_team]
         
-        # 1. FIXED QUALITY CALCULATION (No more equal ratings for mismatches!)
-        home_attack_strength = min(2.5, home_profile['xg_per_game'] * 1.3)
-        away_attack_strength = min(2.5, away_profile['xg_per_game'] * 1.3)
+        # 1. QUALITY CALCULATION with league context
+        home_attack_strength = min(2.5, home_profile['xg_per_game'] * (league_avg_goals / 2.7))
+        away_attack_strength = min(2.5, away_profile['xg_per_game'] * (league_avg_goals / 2.7))
         
-        # Defensive rating: lower is better (2.0 - goals_conceded_per_game)
         home_defense_strength = max(0.5, home_profile['defensive_rating'])
         away_defense_strength = max(0.5, away_profile['defensive_rating'])
         
-        # FIXED: Weight attack more for quality assessment
         home_quality = (home_attack_strength * 0.7) + (home_defense_strength * 0.3)
         away_quality = (away_attack_strength * 0.7) + (away_defense_strength * 0.3)
         
-        # 2. FIXED EXPECTED GOALS CALCULATION
-        # Home team: their attack vs opponent's defense
+        # 2. EXPECTED GOALS with LEAGUE ADJUSTMENT
         home_expected_raw = (home_attack_strength + (2.0 - away_defense_strength)) / 2
         away_expected_raw = (away_attack_strength + (2.0 - home_defense_strength)) / 2
         
-        # Apply home advantage
-        home_advantage = 0.3 + home_profile['home_away_goal_diff'] * 0.2
+        # League-specific home advantage
+        home_advantage = league_home_advantage + home_profile['home_away_goal_diff'] * 0.2
         home_final = home_expected_raw * (1.0 + home_advantage)
         away_final = away_expected_raw * 0.9  # Away disadvantage
         
@@ -73,77 +77,72 @@ class AdvancedUnderstatPredictor:
         total_expected = home_final + away_final
         expected_goal_diff = home_final - away_final
         
-        # 3. FIXED MATCH WINNER LOGIC (Proper mismatch detection)
+        # 3. MATCH WINNER with league context
         quality_diff = home_quality - away_quality
         
-        # Detect extreme mismatches
-        if home_profile['xg_per_game'] > 1.5 and away_profile['xg_per_game'] < 0.7:
-            quality_diff += 0.8  # Home offensive mismatch bonus
-        elif away_profile['xg_per_game'] > 1.5 and home_profile['xg_per_game'] < 0.7:
-            quality_diff -= 0.8  # Away offensive mismatch bonus
+        # League-specific win thresholds
+        if league_name in ['Serie A', 'La Liga']:  # Low scoring, tactical leagues
+            win_threshold = 0.5
+        else:  # Higher scoring leagues
+            win_threshold = 0.4
         
-        # Defensive mismatch detection
-        if home_profile['goals_conceded_pg'] < 0.8 and away_profile['goals_conceded_pg'] > 1.5:
-            quality_diff += 0.5  # Home defensive mismatch bonus
-        
-        # Determine winner with FIXED thresholds
-        if quality_diff > 0.4:  # Clear home advantage
+        if quality_diff > win_threshold:
             winner = "Home Win"
             win_confidence = min(80, 55 + (quality_diff * 25))
-        elif quality_diff < -0.4:  # Clear away advantage
+        elif quality_diff < -win_threshold:
             winner = "Away Win"
             win_confidence = min(78, 53 + (abs(quality_diff) * 25))
-        else:  # Close match
+        else:
             winner = "Draw"
-            win_confidence = 45 + (abs(quality_diff) * -10)  # Closer = higher draw chance
+            win_confidence = 45 + (abs(quality_diff) * -10)
         
-        # 4. FIXED TOTAL GOALS LOGIC (No more "Avoid" when clear)
+        # 4. TOTAL GOALS with LEAGUE-SPECIFIC THRESHOLDS
         avg_total_for_matchup = (home_profile['avg_total_goals'] + away_profile['avg_total_goals']) / 2
         
-        # Calculate over probability based on total expected vs historical
-        if total_expected > avg_total_for_matchup:
-            over_prob = 50 + min(30, (total_expected - avg_total_for_matchup) * 25)
+        # Compare to league average, not fixed 2.5
+        league_adjusted_total = (total_expected * 0.6) + (league_avg_goals * 0.4)
+        
+        # Determine over probability
+        if league_adjusted_total > league_over_threshold:
+            over_prob = 50 + min(30, (league_adjusted_total - league_over_threshold) * 30)
+        elif league_adjusted_total < league_under_threshold:
+            over_prob = 50 - min(30, (league_under_threshold - league_adjusted_total) * 30)
         else:
-            over_prob = 50 - min(30, (avg_total_for_matchup - total_expected) * 25)
+            over_prob = 50  # Close to league thresholds
         
         # Apply game script adjustments
-        if abs(home_final - away_final) > 1.0:  # Expected blowout
-            total_expected *= 0.9
+        if abs(home_final - away_final) > 1.0:
+            league_adjusted_total *= 0.9
             over_prob *= 0.9
-        elif abs(home_final - away_final) < 0.3:  # Close game
-            total_expected *= 1.1
+        elif abs(home_final - away_final) < 0.3:
+            league_adjusted_total *= 1.1
             over_prob *= 1.05
         
-        # FIXED: No more unreasonable "Avoid" predictions
-        if over_prob >= 52:
+        # Final Total Goals decision
+        if over_prob >= 55:
             goals_selection = "Over 2.5 Goals"
             goals_confidence = over_prob * 0.9
-        elif over_prob <= 48:
+        elif over_prob <= 45:
             goals_selection = "Under 2.5 Goals"
             goals_confidence = (100 - over_prob) * 0.9
-        else:  # 48-52% is truly borderline
+        else:
             goals_selection = "Avoid Total Goals"
-            goals_confidence = over_prob  # Show actual probability
+            goals_confidence = over_prob
         
-        # 5. BTTS CALCULATION
-        btts_raw_prob = calculate_btts_poisson_probability(home_final, away_final)
+        # 5. BTTS with league context
+        btts_raw_prob = calculate_btts_poisson_probability(home_final, away_final, league_name)
         
-        # Adjust based on defensive profiles
-        defensive_factor = (home_profile['goals_conceded_pg'] + away_profile['goals_conceded_pg']) / 2.6
-        if defensive_factor > 1.2:  # Both concede a lot
-            btts_raw_prob *= 1.15
-        elif defensive_factor < 0.8:  # Both strong defensively
-            btts_raw_prob *= 0.85
-        
-        # Get BTTS decision
+        # Get BTTS decision with league
         btts_selection, btts_confidence, btts_note = calculate_btts_decision(
-            btts_raw_prob, total_expected,
+            btts_raw_prob, league_adjusted_total,
             home_profile['offensive_rating'], away_profile['offensive_rating'],
+            league_name,
             home_profile['defensive_rating'], away_profile['defensive_rating']
         )
         
         return {
             "team_names": {"home": home_team, "away": away_team},
+            "league": league_name,
             "raw_data": {
                 "home_profile": home_profile,
                 "away_profile": away_profile,
@@ -159,9 +158,14 @@ class AdvancedUnderstatPredictor:
                 "expected_goals": {
                     "home": round(home_final, 2),
                     "away": round(away_final, 2),
-                    "total": round(total_expected, 2)
+                    "total": round(league_adjusted_total, 2)
                 },
                 "expected_goal_diff": round(expected_goal_diff, 2),
+                "league_settings": {
+                    "avg_goals": league_avg_goals,
+                    "over_threshold": league_over_threshold,
+                    "under_threshold": league_under_threshold
+                },
                 "probabilities": {
                     "over_25": round(over_prob, 0),
                     "btts_raw": round(btts_raw_prob, 0),
