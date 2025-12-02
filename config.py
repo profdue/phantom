@@ -65,7 +65,6 @@ LEAGUE_CONFIGS = {
     }
 }
 
-# Model parameters
 MODEL_PARAMS = {
     "attack_weight": 0.7,
     "defense_weight": 0.3,
@@ -73,7 +72,7 @@ MODEL_PARAMS = {
     "league_blend_league": 0.4,
     "mismatch_blend_current": 0.7,
     "mismatch_blend_league": 0.3,
-    "away_form_penalty_threshold": 6,  # points in last 5 away
+    "away_form_penalty_threshold": 6,
     "attack_crisis_threshold": 1.0,
     "defense_crisis_threshold": 1.8,
     "big_match_quality_threshold": 1.5,
