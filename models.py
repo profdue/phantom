@@ -21,7 +21,7 @@ class AdvancedUnderstatPredictor:
                 'goals_conceded_pg': csv_row.get('Team_Goals_Conceded_PG', 1.3),
                 'home_away_goal_diff': csv_row.get('Home_Away_Goal_Diff', 0.0),
                 'offensive_rating': csv_row.get('Goals', 0) / max(1, csv_row.get('Matches', 1)),
-                'defensive_rating': 2.0 - (csv_row.get('Goals_Conceded', 0) / max(1, csv_row.get('Matches', 1)))
+                'defensive_rating': 2.0 - (csv_row.get('Goals_Against', 0) / max(1, csv_row.get('Matches', 1)))
             }
     
     def calculate_advanced_analysis(self, home_data: Dict, away_data: Dict, 
@@ -98,7 +98,6 @@ class AdvancedUnderstatPredictor:
             btts_raw_prob *= 1.15
         
         # 8. MATCH WINNER WITH CONTEXT
-        # (Keep existing match winner logic but with improved inputs)
         quality_diff = (home_xg_pg * 1.15 + home_profile['defensive_rating'] * 1.1) - \
                       (away_xg_pg * 1.15 + away_profile['defensive_rating'] * 1.1)
         
@@ -106,7 +105,7 @@ class AdvancedUnderstatPredictor:
         home_advantage = home_profile['home_away_goal_diff'] * 0.3
         total_advantage = quality_diff + home_advantage
         
-        # Determine winner (simplified version - keep your existing logic here)
+        # Determine winner
         if total_advantage > 0.3:
             winner = "Home Win"
             confidence = min(75, 60 + total_advantage * 15)
@@ -132,27 +131,44 @@ class AdvancedUnderstatPredictor:
         # BTTS decision
         btts_selection, btts_confidence, btts_note = calculate_btts_decision(
             btts_raw_prob, total_expected, 
-            home_profile['offensive_rating'], away_profile['offensive_rating']
+            home_profile['offensive_rating'], away_profile['offensive_rating'],
+            home_defense_adjustment, away_defense_adjustment
         )
         
         return {
+            "team_names": {"home": home_team, "away": away_team},
+            "raw_data": {
+                "home_profile": home_profile,
+                "away_profile": away_profile,
+                "home_overperformance": (home_data["points"] / games_played) - (home_data["xPTS"] / games_played),
+                "away_overperformance": (away_data["points"] / games_played) - (away_data["xPTS"] / games_played)
+            },
             "analysis": {
-                "home_expected": home_final,
-                "away_expected": away_final,
-                "total_expected": total_expected,
-                "expected_goal_diff": expected_goal_diff,
-                "team_profiles": {
-                    "home": home_profile,
-                    "away": away_profile
+                "home_quality": (home_xg_pg * 1.3 + home_profile['defensive_rating'] * 1.2) / 2,
+                "away_quality": (away_xg_pg * 1.3 + away_profile['defensive_rating'] * 1.2) / 2,
+                "quality_diff": total_advantage,
+                "total_advantage": total_advantage,
+                "home_boost": 1.0 + min(0.25, max(0.01, home_advantage)),
+                "expected_goals": {
+                    "home": home_final,
+                    "away": away_final,
+                    "total": total_expected
                 },
-                "game_script": "blowout" if xg_diff > 1.0 else "close" if xg_diff < 0.3 else "normal",
-                "over_confidence": over_confidence,
-                "btts_raw_prob": btts_raw_prob
+                "expected_goal_diff": expected_goal_diff,
+                "probabilities": {
+                    "over_25": over_confidence,
+                    "btts_raw": btts_raw_prob,
+                    "btts_adjust_note": btts_note if 'btts_note' in locals() else ""
+                },
+                "home_momentum": 1.0 + min(0.15, max(-0.15, home_data["points"] / (games_played * 3) - 0.5)),
+                "away_momentum": 1.0 + min(0.15, max(-0.15, away_data["points"] / (games_played * 3) - 0.5)),
+                "home_intangible": 0.02 if home_data["points"] > home_data["xPTS"] else -0.01,
+                "away_intangible": 0.01 if away_data["points"] > away_data["xPTS"] else -0.02,
+                "volatility_note": "High volatility expected" if abs(home_xg_pg - away_xg_pg) > 0.8 else ""
             },
             "predictions": [
                 {"type": "Match Winner", "selection": winner, "confidence": confidence},
                 {"type": "Total Goals", "selection": goals_selection, "confidence": goals_confidence},
                 {"type": "Both Teams To Score", "selection": btts_selection, "confidence": btts_confidence}
-            ],
-            "team_names": {"home": home_team, "away": away_team}
+            ]
         }
