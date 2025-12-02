@@ -8,7 +8,7 @@ from utils import (
     load_league_data,
     get_available_leagues
 )
-from betting_advisor import BettingAdvisor  # NEW IMPORT
+from betting_advisor import BettingAdvisor
 
 def main():
     st.set_page_config(page_title="Advanced xG Predictor", page_icon="📊", layout="wide")
@@ -16,7 +16,7 @@ def main():
     st.markdown("**Probabilistic Modeling • Dynamic Analysis • Evidence-Based Predictions**")
     
     predictor = AdvancedUnderstatPredictor()
-    betting_advisor = BettingAdvisor()  # NEW: Betting advisor instance
+    betting_advisor = BettingAdvisor()
     
     # Sidebar with league selection
     st.sidebar.header("📂 Load League Data")
@@ -134,7 +134,7 @@ def main():
     
     games_played = min(int(home_team_data['Matches']), int(away_team_data['Matches']))
     
-    # NEW: Two buttons - one for analysis, one for betting recommendations
+    # Two buttons - one for analysis, one for betting recommendations
     col1, col2 = st.columns(2)
     
     with col1:
@@ -189,13 +189,25 @@ def run_betting_advisor(predictor, betting_advisor, home_data, away_data, home_t
         advisor_display = betting_advisor.display_recommendations(recommendations)
         st.markdown(advisor_display)
         
-        # Show advisor performance summary
+        # Show advisor performance summary (FIXED VERSION)
         with st.expander("📈 Advisor Performance Summary"):
             summary = betting_advisor.get_performance_summary()
-            st.write(f"**Matches Analyzed:** {summary['total_matches_analyzed']}")
-            st.write(f"**Total Recommendations:** {summary['total_recommendations']}")
-            st.write(f"**Avg Recommendations per Match:** {summary['avg_recommendations_per_match']:.1f}")
-            st.write(f"**Matches with Strong Bets:** {summary['matches_with_strong_recommendations']}")
+            if summary:  # Check if summary exists
+                st.write(f"**Matches Analyzed:** {summary.get('total_matches_analyzed', 0)}")
+                st.write(f"**Total Recommendations:** {summary.get('total_recommendations', 0)}")
+                
+                # Handle both old and new field names for strong bets
+                strong_bets = summary.get('strong_recommendations', 
+                                         summary.get('total_strong_bets', 
+                                                   summary.get('matches_with_strong_recommendations', 0)))
+                st.write(f"**Strong Bets:** {strong_bets}")
+                
+                st.write(f"**Avg Recommendations per Match:** {summary.get('avg_recommendations_per_match', 0):.1f}")
+                
+                if 'avg_strong_bets_per_match' in summary:
+                    st.write(f"**Avg Strong Bets per Match:** {summary['avg_strong_bets_per_match']:.1f}")
+            else:
+                st.write("No performance data available yet.")
 
 def display_results(result, games_played):
     """Display the analysis results in Streamlit"""
