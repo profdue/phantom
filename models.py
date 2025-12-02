@@ -2,7 +2,6 @@
 Prediction model classes implementing v2.3 logic
 """
 import math
-import numpy as np
 from config import LEAGUE_CONFIGS, MODEL_PARAMS
 
 class TeamProfile:
@@ -34,21 +33,21 @@ class TeamProfile:
         
         # Last 5 form data
         if is_home:
-            self.last5_wins = int(data_dict['Last5_Home_Wins'])
-            self.last5_draws = int(data_dict['Last5_Home_Draws'])
-            self.last5_losses = int(data_dict['Last5_Home_Losses'])
-            self.last5_gf = int(data_dict['Last5_Home_GF'])
-            self.last5_ga = int(data_dict['Last5_Home_GA'])
-            self.last5_gd = int(data_dict['Last5_Home_GD'])
-            self.last5_pts = int(data_dict['Last5_Home_PTS'])
+            self.last5_wins = int(data_dict.get('Last5_Home_Wins', 0))
+            self.last5_draws = int(data_dict.get('Last5_Home_Draws', 0))
+            self.last5_losses = int(data_dict.get('Last5_Home_Losses', 0))
+            self.last5_gf = int(data_dict.get('Last5_Home_GF', 0))
+            self.last5_ga = int(data_dict.get('Last5_Home_GA', 0))
+            self.last5_gd = int(data_dict.get('Last5_Home_GD', 0))
+            self.last5_pts = int(data_dict.get('Last5_Home_PTS', 0))
         else:
-            self.last5_wins = int(data_dict['Last5_Away_Wins'])
-            self.last5_draws = int(data_dict['Last5_Away_Draws'])
-            self.last5_losses = int(data_dict['Last5_Away_Losses'])
-            self.last5_gf = int(data_dict['Last5_Away_GF'])
-            self.last5_ga = int(data_dict['Last5_Away_GA'])
-            self.last5_gd = int(data_dict['Last5_Away_GD'])
-            self.last5_pts = int(data_dict['Last5_Away_PTS'])
+            self.last5_wins = int(data_dict.get('Last5_Away_Wins', 0))
+            self.last5_draws = int(data_dict.get('Last5_Away_Draws', 0))
+            self.last5_losses = int(data_dict.get('Last5_Away_Losses', 0))
+            self.last5_gf = int(data_dict.get('Last5_Away_GF', 0))
+            self.last5_ga = int(data_dict.get('Last5_Away_GA', 0))
+            self.last5_gd = int(data_dict.get('Last5_Away_GD', 0))
+            self.last5_pts = int(data_dict.get('Last5_Away_PTS', 0))
         
         # Calculate flags
         self.has_attack_crisis = self._check_attack_crisis()
@@ -80,7 +79,6 @@ class TeamProfile:
         if opponent_xg > 0:
             return math.exp(-opponent_xg) * 100
         return 0.0
-
 
 class MatchPredictor:
     """Main prediction engine implementing v2.3 logic"""
