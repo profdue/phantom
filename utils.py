@@ -1,8 +1,41 @@
 """
 Utility functions for the prediction system
 """
+import pandas as pd
+import os
 import json
 from datetime import datetime
+
+def get_available_leagues():
+    """Get list of available league CSV files"""
+    data_dir = "data"
+    leagues = {}
+    
+    if not os.path.exists(data_dir):
+        return leagues
+    
+    for file in os.listdir(data_dir):
+        if file.endswith("_home_away.csv"):
+            league_name = file.replace("_home_away.csv", "")
+            leagues[league_name] = os.path.join(data_dir, file)
+    
+    return leagues
+
+def load_league_data(league_name):
+    """Load CSV data for a specific league"""
+    leagues = get_available_leagues()
+    
+    if league_name not in leagues:
+        raise ValueError(f"League {league_name} not found. Available: {list(leagues.keys())}")
+    
+    file_path = leagues[league_name]
+    df = pd.read_csv(file_path)
+    df.columns = [col.strip() for col in df.columns]
+    
+    home_teams = df[df['Home_Away'] == 'Home']
+    away_teams = df[df['Home_Away'] == 'Away']
+    
+    return home_teams, away_teams
 
 class PredictionUtils:
     """Utility functions for predictions"""
@@ -23,28 +56,6 @@ class PredictionUtils:
         with open(filename, 'a') as f:
             json.dump(prediction, f, indent=2)
             f.write('\n')
-    
-    @staticmethod
-    def calculate_performance_metrics(predictions_history):
-        """Calculate model performance metrics"""
-        if not predictions_history:
-            return {}
-        
-        metrics = {
-            "total_predictions": len(predictions_history),
-            "markets": {
-                "winner": {"correct": 0, "total": 0},
-                "total_goals": {"correct": 0, "total": 0},
-                "btts": {"correct": 0, "total": 0}
-            }
-        }
-        
-        for pred in predictions_history:
-            # This would need actual results to compare
-            # Placeholder for implementation
-            pass
-        
-        return metrics
     
     @staticmethod
     def validate_csv_structure(df):
