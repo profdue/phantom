@@ -5,7 +5,7 @@ from models import AdvancedUnderstatPredictor
 from utils import (
     validate_input_data,
     get_league_adjustments,
-    calculate_team_specific_adjustments
+    calculate_team_specific_adjustments,
     format_prediction_display,
     load_league_data,
     get_available_leagues
