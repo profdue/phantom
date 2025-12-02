@@ -1,81 +1,76 @@
 """
-Prediction model classes implementing v3.0 logic
-Form-First, xG-Trends Second, Quality-Third Approach
+PHANTOM v4.0 - Predictive Logic
+No Avoid predictions - Clear Yes/No, Over/Under, Win/Draw/Lose
 """
 import math
 
-# League configurations
+# ============================================================================
+# LEAGUE CONFIGURATIONS - AGGRESSIVE SETTINGS
+# ============================================================================
+
 LEAGUE_CONFIGS = {
     "premier_league": {
         "name": "Premier League",
         "avg_goals": 2.93,
-        "over_threshold": 2.8,
-        "under_threshold": 2.6,
-        "home_advantage": 0.30,  # Reduced from 0.35
-        "btts_baseline": 56,
-        "form_threshold": 0.25,  # Lower threshold for form-based predictions
-        "total_goals_adjust": 0.2  # Boost for high-scoring league
+        "over_threshold": 2.75,  # LOWER threshold for more Over predictions
+        "under_threshold": 2.55,  # HIGHER threshold for more Under predictions
+        "home_advantage": 0.25,   # Reduced but meaningful
+        "btts_baseline": 52,      # Lower baseline = more Yes predictions
+        "win_threshold": 0.25,    # LOWER = more decisive winner predictions
+        "form_weight": 0.4        # Higher form weight
     },
     "serie_a": {
         "name": "Serie A",
         "avg_goals": 2.56,
-        "over_threshold": 2.45,
-        "under_threshold": 2.25,
-        "home_advantage": 0.20,  # Reduced from 0.25
-        "btts_baseline": 51,
-        "form_threshold": 0.30,
-        "total_goals_adjust": -0.2  # Reduction for low-scoring league
+        "over_threshold": 2.40,
+        "under_threshold": 2.20,
+        "home_advantage": 0.20,
+        "btts_baseline": 48,
+        "win_threshold": 0.30,
+        "form_weight": 0.35
     },
     "la_liga": {
         "name": "La Liga",
         "avg_goals": 2.62,
-        "over_threshold": 2.5,
-        "under_threshold": 2.3,
-        "home_advantage": 0.25,  # Reduced from 0.30
-        "btts_baseline": 56,
-        "form_threshold": 0.28,
-        "total_goals_adjust": -0.1
+        "over_threshold": 2.45,
+        "under_threshold": 2.25,
+        "home_advantage": 0.22,
+        "btts_baseline": 50,
+        "win_threshold": 0.28,
+        "form_weight": 0.38
     },
     "bundesliga": {
         "name": "Bundesliga",
         "avg_goals": 3.14,
-        "over_threshold": 3.0,
-        "under_threshold": 2.8,
-        "home_advantage": 0.30,  # Reduced from 0.40
-        "btts_baseline": 58,
-        "form_threshold": 0.25,
-        "total_goals_adjust": 0.3
+        "over_threshold": 2.90,
+        "under_threshold": 2.70,
+        "home_advantage": 0.30,
+        "btts_baseline": 55,
+        "win_threshold": 0.22,
+        "form_weight": 0.42
     },
     "ligue_1": {
         "name": "Ligue 1",
         "avg_goals": 2.78,
-        "over_threshold": 2.7,
-        "under_threshold": 2.5,
-        "home_advantage": 0.25,  # Reduced from 0.32
-        "btts_baseline": 54,
-        "form_threshold": 0.28,
-        "total_goals_adjust": 0.1
-    },
-    "rfpl": {
-        "name": "Russian Premier League",
-        "avg_goals": 2.68,
-        "over_threshold": 2.6,
-        "under_threshold": 2.4,
-        "home_advantage": 0.22,  # Reduced from 0.28
-        "btts_baseline": 53,
-        "form_threshold": 0.30,
-        "total_goals_adjust": 0.0
+        "over_threshold": 2.60,
+        "under_threshold": 2.40,
+        "home_advantage": 0.23,
+        "btts_baseline": 50,
+        "win_threshold": 0.26,
+        "form_weight": 0.36
     }
 }
 
+# ============================================================================
+# TEAM PROFILE - FOCUS ON WHAT MATTERS
+# ============================================================================
+
 class TeamProfile:
-    """Represents a team's statistical profile with form-first focus"""
-    
     def __init__(self, data_dict, is_home=True):
         self.name = data_dict['Team']
         self.is_home = is_home
         
-        # Core stats
+        # Only essential stats
         self.matches = int(data_dict['Matches'])
         self.wins = int(data_dict['Wins'])
         self.draws = int(data_dict['Draws'])
@@ -84,28 +79,23 @@ class TeamProfile:
         self.goals_against = int(data_dict['Goals_Against'])
         self.points = int(data_dict['Points'])
         
-        # Advanced metrics
+        # xG data
         self.xg = float(data_dict['xG'])
         self.xga = float(data_dict['xGA'])
-        self.xpts = float(data_dict['xPTS'])
         
-        # Calculated per-game averages
-        self.goals_pg = self.goals_for / self.matches if self.matches > 0 else 0
-        self.goals_against_pg = self.goals_against / self.matches if self.matches > 0 else 0
-        self.xg_pg = self.xg / self.matches if self.matches > 0 else 0
-        self.xga_pg = self.xga / self.matches if self.matches > 0 else 0
+        # Per-game averages
+        self.goals_pg = self.goals_for / max(1, self.matches)
+        self.goals_against_pg = self.goals_against / max(1, self.matches)
+        self.xg_pg = self.xg / max(1, self.matches)
+        self.xga_pg = self.xga / max(1, self.matches)
         
-        # xG performance ratio (goals/xG)
-        self.xg_performance = self.goals_for / self.xg if self.xg > 0 else 1.0
-        
-        # Last 5 form data
+        # Last 5 form (THE MOST IMPORTANT)
         if is_home:
             self.last5_wins = int(data_dict.get('Last5_Home_Wins', 0))
             self.last5_draws = int(data_dict.get('Last5_Home_Draws', 0))
             self.last5_losses = int(data_dict.get('Last5_Home_Losses', 0))
             self.last5_gf = int(data_dict.get('Last5_Home_GF', 0))
             self.last5_ga = int(data_dict.get('Last5_Home_GA', 0))
-            self.last5_gd = int(data_dict.get('Last5_Home_GD', 0))
             self.last5_pts = int(data_dict.get('Last5_Home_PTS', 0))
         else:
             self.last5_wins = int(data_dict.get('Last5_Away_Wins', 0))
@@ -113,196 +103,155 @@ class TeamProfile:
             self.last5_losses = int(data_dict.get('Last5_Away_Losses', 0))
             self.last5_gf = int(data_dict.get('Last5_Away_GF', 0))
             self.last5_ga = int(data_dict.get('Last5_Away_GA', 0))
-            self.last5_gd = int(data_dict.get('Last5_Away_GD', 0))
             self.last5_pts = int(data_dict.get('Last5_Away_PTS', 0))
         
-        # Calculate form momentum (LAST 3 GAMES WEIGHTED HEAVILY)
-        self.form_momentum = self._calculate_form_momentum()
+        # Calculate key metrics
+        self.form_score = self._calculate_form_score()
+        self.attack_strength = self._calculate_attack_strength()
+        self.defense_strength = self._calculate_defense_strength()
+        self.btts_tendency = self._calculate_btts_tendency()
         
-        # Calculate xG trend (recent vs average)
-        self.xg_trend = self._calculate_xg_trend()
+    def _calculate_form_score(self):
+        """Form score 0-1, heavily weighted to recent games"""
+        if self.last5_pts == 0:
+            return 0.3  # Default for no data
         
-        # Calculate recent BTTS trend
-        self.recent_btts_trend = self._calculate_btts_trend()
+        # Last 3 games estimated (more weight)
+        last3_est = (self.last5_pts / 5) * 1.3  # Assume recent games were better/worse
+        last3_est = min(1.0, last3_est)
         
-        # Crisis detection (less aggressive)
-        self.has_attack_crisis = self._check_attack_crisis()
-        self.has_defense_crisis = self._check_defense_crisis()
+        # Last 5 games
+        last5_score = self.last5_pts / 15
+        
+        # Weight: 70% last 3 games, 30% last 5 games
+        return (last3_est * 0.7) + (last5_score * 0.3)
     
-    def _calculate_form_momentum(self):
-        """Calculate form momentum with last 3 games weighted 70%"""
-        # Last 5 form (0-1 scale)
-        last5_form = self.last5_pts / 15 if self.last5_pts > 0 else 0.33
+    def _calculate_attack_strength(self):
+        """Attack strength 0-2 scale"""
+        # Recent goals matter MORE than xG
+        recent_gpg = self.last5_gf / 5 if self.last5_gf > 0 else 0.5
+        season_gpg = self.goals_pg
         
-        # Estimate last 3 form (simplified - assuming linear distribution)
-        # In production, you'd want actual last 3 game data
-        last3_est = min(1.0, (self.last5_pts / 5) * 1.2)  # Approximate
+        # Weight: 60% recent form, 40% season average
+        gpg = (recent_gpg * 0.6) + (season_gpg * 0.4)
         
-        # Weighted: 70% last 3 games, 30% last 5 games
-        weighted_form = (last3_est * 0.7) + (last5_form * 0.3)
-        
-        # Convert to 0-0.3 scale for momentum
-        return weighted_form * 0.3
+        # Cap and scale
+        return min(2.0, gpg * 1.2)
     
-    def _calculate_xg_trend(self):
-        """Calculate if team is over/underperforming xG recently"""
-        # Simplified: compare goals/xG ratio
-        if self.xg > 0:
-            ratio = self.goals_for / self.xg
-            if ratio > 1.2:
-                return 0.8  # Overperforming - likely unsustainable
-            elif ratio < 0.8:
-                return 1.2  # Underperforming - positive regression likely
-        return 1.0  # Normal performance
+    def _calculate_defense_strength(self):
+        """Defense strength 0-2 scale (higher = better defense)"""
+        # Recent goals against matter MORE
+        recent_gapg = self.last5_ga / 5 if self.last5_ga > 0 else 1.0
+        season_gapg = self.goals_against_pg
+        
+        # Weight: 70% recent form, 30% season average
+        gapg = (recent_gapg * 0.7) + (season_gapg * 0.3)
+        
+        # Convert to defense strength (lower GA = higher strength)
+        return max(0.5, 2.0 - gapg)
     
-    def _calculate_btts_trend(self):
-        """Calculate recent BTTS tendency"""
-        # Simplified: based on recent goals for/against
+    def _calculate_btts_tendency(self):
+        """1.0 = neutral, >1.0 favors BTTS, <1.0 against BTTS"""
+        # Both scoring AND conceding recently = high BTTS tendency
         if self.last5_gf > 0 and self.last5_ga > 0:
-            # Both scoring and conceding in recent games
-            return 1.1  # Slightly favors BTTS
+            # Calculate ratio of games with both GF and GA
+            # Assuming at least 2 games with both = high tendency
+            if self.last5_gf >= 3 and self.last5_ga >= 3:
+                return 1.3  # Strong BTTS tendency
+            else:
+                return 1.1  # Moderate BTTS tendency
         elif self.last5_gf == 0 or self.last5_ga == 0:
-            # Not scoring or not conceding
-            return 0.9  # Slightly against BTTS
+            return 0.8  # Low BTTS tendency
         return 1.0
-    
-    def _check_attack_crisis(self):
-        """Less aggressive attack crisis detection"""
-        if self.xg_pg < 1.0:
-            if self.last5_gf / 5 < 0.3:  # Very low scoring
-                if self.last5_losses >= 3:  # Severe losing streak
-                    return True
-        return False
-    
-    def _check_defense_crisis(self):
-        """Less aggressive defense crisis detection"""
-        return self.goals_against_pg > 2.0  # Only crisis if conceding >2 per game
-    
-    def get_clean_sheet_probability(self, opponent_xg):
-        """Calculate probability of keeping clean sheet"""
-        if opponent_xg > 0:
-            base_prob = math.exp(-opponent_xg) * 100
-            # Adjust based on recent defensive form
-            if self.last5_ga == 0:
-                return min(95, base_prob * 1.3)  # Recent clean sheets
-            elif self.last5_ga / 5 > 2.0:
-                return max(5, base_prob * 0.7)  # Leaky recently
-            return base_prob
-        return 0.0
+
+# ============================================================================
+# MATCH PREDICTOR - BOLD PREDICTIONS
+# ============================================================================
 
 class MatchPredictor:
-    """Main prediction engine implementing v3.0 logic"""
-    
     def __init__(self, league_name):
         self.league_config = LEAGUE_CONFIGS.get(league_name.lower())
         if not self.league_config:
             raise ValueError(f"Unknown league: {league_name}")
     
     def predict(self, home_team: TeamProfile, away_team: TeamProfile):
-        """Generate predictions for a match using form-first logic"""
+        """Make BOLD predictions - No Avoids allowed"""
         
-        # 1. Calculate form-based predictions (PRIMARY)
-        form_pred = self._predict_from_form(home_team, away_team)
+        # 1. WINNER PREDICTION (ALWAYS pick winner, no Draw unless very close)
+        winner_pred = self._predict_winner(home_team, away_team)
         
-        # 2. Calculate expected goals with xG trends
+        # 2. EXPECTED GOALS
         home_xg, away_xg = self._calculate_expected_goals(home_team, away_team)
         total_xg = home_xg + away_xg
         
-        # 3. Total goals prediction
+        # 3. TOTAL GOALS (ALWAYS Over or Under, no Avoid)
         total_pred = self._predict_total_goals(total_xg, home_team, away_team)
         
-        # 4. BTTS prediction
+        # 4. BTTS (ALWAYS Yes or No, no Avoid)
         btts_pred = self._predict_btts(home_xg, away_xg, home_team, away_team)
-        
-        # 5. Quality ratings (for display only, not primary prediction)
-        home_quality, away_quality = self._calculate_display_quality(home_team, away_team)
         
         return {
             "analysis": {
                 "league": self.league_config['name'],
-                "quality_ratings": {
-                    "home": round(home_quality, 2),
-                    "away": round(away_quality, 2)
+                "form_scores": {
+                    "home": round(home_team.form_score, 2),
+                    "away": round(away_team.form_score, 2)
                 },
                 "expected_goals": {
                     "home": round(home_xg, 2),
                     "away": round(away_xg, 2),
                     "total": round(total_xg, 2)
                 },
-                "team_flags": {
-                    "home_attack_crisis": home_team.has_attack_crisis,
-                    "away_attack_crisis": away_team.has_attack_crisis,
-                    "home_defense_crisis": home_team.has_defense_crisis,
-                    "away_defense_crisis": away_team.has_defense_crisis
-                },
-                "form_notes": {
-                    "home_form": f"{home_team.last5_wins}-{home_team.last5_draws}-{home_team.last5_losses}",
-                    "away_form": f"{away_team.last5_wins}-{away_team.last5_draws}-{away_team.last5_losses}",
-                    "home_pts": f"{home_team.last5_pts}/15",
-                    "away_pts": f"{away_team.last5_pts}/15"
+                "attack_strengths": {
+                    "home": round(home_team.attack_strength, 2),
+                    "away": round(away_team.attack_strength, 2)
                 }
             },
-            "predictions": [form_pred, total_pred, btts_pred]
+            "predictions": [winner_pred, total_pred, btts_pred]
         }
     
-    def _predict_from_form(self, home: TeamProfile, away: TeamProfile):
-        """PRIMARY PREDICTOR: Form-based winner prediction"""
+    def _predict_winner(self, home: TeamProfile, away: TeamProfile):
+        """ALWAYS predict a winner (Draw only if extremely close)"""
         
-        # Form difference (home form - away form)
-        form_diff = home.form_momentum - away.form_momentum
+        # FORM DIFFERENCE (most important)
+        form_diff = home.form_score - away.form_score
         
-        # Get form points per game (more intuitive)
-        home_ppg = home.last5_pts / 5 if home.last5_pts > 0 else 0
-        away_ppg = away.last5_pts / 5 if away.last5_pts > 0 else 0
-        ppg_diff = home_ppg - away_ppg
+        # ATTACK/DEFENSE DIFFERENCE
+        attack_diff = home.attack_strength - away.attack_strength
+        defense_diff = home.defense_strength - away.defense_strength
         
-        # Form threshold from league config
-        form_threshold = self.league_config['form_threshold']
+        # COMBINED ADVANTAGE
+        total_advantage = (form_diff * 0.5) + (attack_diff * 0.3) + (defense_diff * 0.2)
         
-        # xG trend adjustments
-        xg_trend_adjust = 0
-        if home.xg_trend > 1.1:  # Home underperforming xG
-            xg_trend_adjust += 0.1
-        if away.xg_trend < 0.9:  # Away overperforming xG
-            xg_trend_adjust -= 0.1
+        # Apply home advantage
+        total_advantage += self.league_config['home_advantage'] * 0.3
         
-        # Adjusted form difference
-        adjusted_diff = ppg_diff + xg_trend_adjust
+        # DECISION (very low threshold for draws)
+        win_threshold = self.league_config['win_threshold']
         
-        # Determine winner based on form
-        if adjusted_diff > form_threshold:
+        if total_advantage > win_threshold:
             selection = "Home Win"
-            # Conservative confidence: base + form advantage
-            base_conf = 50
-            form_boost = min(25, abs(adjusted_diff) * 40)  # Max 25% boost
-            confidence = base_conf + form_boost
+            confidence = 55 + (total_advantage * 25)
             
-        elif adjusted_diff < -form_threshold:
+        elif total_advantage < -win_threshold:
             selection = "Away Win"
-            base_conf = 50
-            form_boost = min(25, abs(adjusted_diff) * 40)
-            confidence = base_conf + form_boost
+            confidence = 55 + (abs(total_advantage) * 25)
             
-        else:
+        else:  # Very close match
             selection = "Draw"
-            # Draw confidence based on how close the match is
-            closeness = 1.0 - min(1.0, abs(adjusted_diff) / form_threshold)
-            confidence = 45 + (closeness * 20)  # 45-65% range
+            # Draw confidence based on how close
+            closeness = 1.0 - (abs(total_advantage) / win_threshold)
+            confidence = 50 + (closeness * 15)
         
-        # Adjust for home advantage (reduced in v3.0)
-        if "Home" in selection:
+        # CONFIDENCE ADJUSTMENTS
+        # Recent goal scoring boosts confidence
+        if home.last5_gf / 5 > 1.5 and "Home" in selection:
             confidence += 5
-        elif "Away" in selection:
-            confidence -= 5
-        
-        # Adjust for crises
-        if home.has_attack_crisis and "Home" in selection:
-            confidence -= 8
-        if away.has_attack_crisis and "Away" in selection:
-            confidence -= 8
-        
-        # Cap confidence conservatively
-        confidence = max(40, min(75, confidence))
+        if away.last5_gf / 5 > 1.5 and "Away" in selection:
+            confidence += 5
+            
+        # Cap confidence
+        confidence = max(45, min(80, confidence))
         
         return {
             "type": "Match Winner",
@@ -311,72 +260,55 @@ class MatchPredictor:
         }
     
     def _calculate_expected_goals(self, home: TeamProfile, away: TeamProfile):
-        """Calculate expected goals with xG trend adjustments"""
+        """Calculate expected goals - SIMPLE and EFFECTIVE"""
         
-        # Base xG from team profiles (per game averages)
-        home_base = home.xg_pg * home.xg_trend  # Adjust for xG trend
-        away_base = away.xg_pg * away.xg_trend
+        # Home xG = Home attack × (2.0 - Away defense) × Home advantage
+        home_raw = home.attack_strength * (2.0 - away.defense_strength)
+        home_xg = home_raw * (1.0 + self.league_config['home_advantage'])
         
-        # Defense adjustment
-        home_def_adj = max(0.5, 2.0 - away.goals_against_pg)
-        away_def_adj = max(0.5, 2.0 - home.goals_against_pg)
+        # Away xG = Away attack × (2.0 - Home defense) × Away factor
+        away_raw = away.attack_strength * (2.0 - home.defense_strength)
+        away_xg = away_raw * 0.9  # Standard away penalty
         
-        # Raw calculations
-        home_raw = (home_base + home_def_adj) / 2
-        away_raw = (away_base + away_def_adj) / 2
-        
-        # Apply home advantage (reduced in v3.0)
-        home_adv = self.league_config['home_advantage']
-        home_bonus = 0.05 if home.last5_wins >= 3 else 0
-        home_final = home_raw * (1.0 + home_adv + home_bonus)
-        
-        # Away penalty based on form
-        if away.last5_pts < 6:  # Poor away form
-            away_final = away_raw * 0.85
-        else:
-            away_final = away_raw * 0.92  # Reduced penalty
-        
-        # Attack crisis adjustments (less aggressive)
-        if home.has_attack_crisis:
-            home_final *= 0.8  # Was 0.6
-        if away.has_attack_crisis:
-            away_final *= 0.8  # Was 0.6
-        
-        return home_final, away_final
+        # Recent form adjustments
+        if home.last5_gf / 5 > 1.5:
+            home_xg *= 1.1  # Hot attack
+        if away.last5_gf / 5 > 1.5:
+            away_xg *= 1.1
+            
+        return home_xg, away_xg
     
     def _predict_total_goals(self, total_xg: float, home: TeamProfile, away: TeamProfile):
-        """Predict total goals with form considerations"""
+        """ALWAYS predict Over or Under"""
         
-        # League adjustment
+        # League context
         league_avg = self.league_config['avg_goals']
-        league_adjust = self.league_config['total_goals_adjust']
-        
-        # Recent scoring form
-        recent_scoring = 0
-        if home.last5_gf / 5 > 1.5 and away.last5_gf / 5 > 1.5:
-            recent_scoring = 0.3  # Both scoring recently
-        elif home.last5_gf / 5 < 0.8 and away.last5_gf / 5 < 0.8:
-            recent_scoring = -0.3  # Both struggling to score
-        
-        # Adjusted total
-        total = (total_xg * 0.6) + (league_avg * 0.4) + league_adjust + recent_scoring
-        
-        # Compare to thresholds
         over_thresh = self.league_config['over_threshold']
         under_thresh = self.league_config['under_threshold']
         
-        if total > over_thresh + 0.2:  # Clear over
-            selection = "Over 2.5 Goals"
-            confidence = 50 + ((total - over_thresh) * 20)
-        elif total < under_thresh - 0.2:  # Clear under
-            selection = "Under 2.5 Goals"
-            confidence = 50 + ((under_thresh - total) * 20)
-        else:  # Close to threshold
-            selection = "Avoid Total Goals"
-            confidence = 50
+        # Recent scoring trend
+        home_recent_gpg = home.last5_gf / 5
+        away_recent_gpg = away.last5_gf / 5
+        recent_scoring = (home_recent_gpg + away_recent_gpg) / 2
         
-        # Confidence cap
-        confidence = max(40, min(75, confidence))
+        # Adjusted total (60% xG, 40% recent form)
+        adjusted_total = (total_xg * 0.6) + (recent_scoring * 2.0 * 0.4)
+        
+        # DECISION - NO AVOID
+        if adjusted_total > over_thresh:
+            selection = "Over 2.5 Goals"
+            # Confidence based on how far above threshold
+            excess = (adjusted_total - over_thresh) / over_thresh
+            confidence = 55 + (excess * 25)
+            
+        else:  # MUST be Under
+            selection = "Under 2.5 Goals"
+            # Confidence based on how far below average
+            deficit = (league_avg - adjusted_total) / league_avg
+            confidence = 55 + (deficit * 25)
+        
+        # Cap confidence
+        confidence = max(50, min(80, confidence))
         
         return {
             "type": "Total Goals",
@@ -386,65 +318,37 @@ class MatchPredictor:
     
     def _predict_btts(self, home_xg: float, away_xg: float, 
                      home: TeamProfile, away: TeamProfile):
-        """Predict Both Teams To Score with conservative thresholds"""
+        """ALWAYS predict Yes or No"""
         
-        # Base Poisson probability
+        # Base probability from xG
         home_score_prob = 1 - math.exp(-home_xg)
         away_score_prob = 1 - math.exp(-away_xg)
-        btts_raw = home_score_prob * away_score_prob * 100
+        btts_prob = home_score_prob * away_score_prob * 100
         
-        # Recent BTTS trend adjustment
-        trend_adjust = (home.recent_btts_trend * away.recent_btts_trend) * 100
-        btts_adjusted = btts_raw * (trend_adjust / 100)
+        # Apply team tendencies
+        btts_prob *= ((home.btts_tendency + away.btts_tendency) / 2)
         
-        # Clean sheet risk (less aggressive)
-        home_cs_prob = home.get_clean_sheet_probability(away_xg)
-        away_cs_prob = away.get_clean_sheet_probability(home_xg)
+        # Recent BTTS trend
+        home_btss_games = min(3, home.last5_gf)  # Estimate games they scored
+        away_btss_games = min(3, away.last5_gf)
+        recent_btss_factor = (home_btss_games + away_btss_games) / 6  # 0-1 scale
+        btts_prob *= (0.8 + (recent_btss_factor * 0.4))  # 0.8-1.2 adjustment
         
-        if home_cs_prob > 45:  # Higher threshold
-            btts_adjusted *= 0.9  # Only 10% reduction
-        if away_cs_prob > 45:
-            btts_adjusted *= 0.9
-        
-        # Attack crisis adjustment
-        if home.has_attack_crisis:
-            btts_adjusted *= 0.85  # Was 0.7
-        if away.has_attack_crisis:
-            btts_adjusted *= 0.85  # Was 0.7
-        
-        # Compare to league baseline
+        # DECISION - NO AVOID
         baseline = self.league_config['btts_baseline']
         
-        # WIDER AVOID ZONE (40-60% instead of 48-54%)
-        if btts_adjusted > 60:  # Was baseline + 8
+        if btts_prob >= baseline:
             selection = "Yes"
-            confidence = min(75, btts_adjusted)
-        elif btts_adjusted < 40:  # Was baseline - 10
-            selection = "No"
-            confidence = min(75, 100 - btts_adjusted)
+            confidence = min(80, btts_prob)
         else:
-            selection = "Avoid BTTS"
-            confidence = 50
+            selection = "No"
+            confidence = min(80, 100 - btts_prob)
+        
+        # Minimum confidence
+        confidence = max(50, confidence)
         
         return {
             "type": "BTTS",
             "selection": selection,
             "confidence": round(confidence, 1)
         }
-    
-    def _calculate_display_quality(self, home: TeamProfile, away: TeamProfile):
-        """Calculate quality ratings for display only"""
-        # Attack strength
-        league_factor = self.league_config['avg_goals'] / 2.7
-        home_attack = min(2.5, home.xg_pg * league_factor * home.xg_trend)
-        away_attack = min(2.5, away.xg_pg * league_factor * away.xg_trend)
-        
-        # Defense strength (less aggressive min)
-        home_defense = max(0.6, 2.0 - home.goals_against_pg)  # Was 0.4
-        away_defense = max(0.6, 2.0 - away.goals_against_pg)  # Was 0.4
-        
-        # Quality with form weighted lower (60% attack, 30% defense, 10% form)
-        home_quality = (home_attack * 0.6) + (home_defense * 0.3) + (home.form_momentum * 3.33)  # Scaled
-        away_quality = (away_attack * 0.6) + (away_defense * 0.3) + (away.form_momentum * 3.33)
-        
-        return home_quality, away_quality
