@@ -70,16 +70,23 @@ class AdvancedUnderstatPredictor:
         total_expected = home_final + away_final
         expected_goal_diff = home_final - away_final
         
-        # 5. OVER/UNDER CONFIDENCE WITH TEAM-SPECIFIC THRESHOLDS
+        # 5. FIXED: OVER/UNDER CONFIDENCE WITH TEAM-SPECIFIC THRESHOLDS
         # Use team's historical averages to set thresholds
         avg_total_for_matchup = (home_profile['avg_total_goals'] + away_profile['avg_total_goals']) / 2
         
-        if total_expected > avg_total_for_matchup + 0.3:
-            over_confidence = min(75, 50 + (total_expected - avg_total_for_matchup) * 20)
-        elif total_expected < avg_total_for_matchup - 0.3:
-            over_confidence = max(25, 50 - (avg_total_for_matchup - total_expected) * 20)
+        # FIXED LOGIC: Remove the problematic "dead zone"
+        # If total expected > historical average, lean Over
+        # If total expected < historical average, lean Under
+        if total_expected > avg_total_for_matchup:
+            # Above historical average - lean Over
+            diff = total_expected - avg_total_for_matchup
+            # Scale confidence: 50% at average, up to 75% at +1.25 above average
+            over_confidence = min(75, 50 + (diff * 20))
         else:
-            over_confidence = 45  # Close to historical average
+            # Below historical average - lean Under
+            diff = avg_total_for_matchup - total_expected
+            # Scale confidence: 50% at average, down to 25% at -1.25 below average
+            over_confidence = max(25, 50 - (diff * 20))
         
         # 6. BTTS IMPROVEMENT WITH DEFENSIVE ANALYSIS
         # Consider both teams' defensive weaknesses
@@ -120,8 +127,8 @@ class AdvancedUnderstatPredictor:
             winner = "Draw"
             confidence = 48
         
-        # 9. FINAL PREDICTIONS WITH IMPROVED CONFIDENCE
-        # Total Goals decision
+        # 9. FIXED: FINAL PREDICTIONS WITH IMPROVED CONFIDENCE
+        # Total Goals decision - FIXED THRESHOLDS
         if over_confidence >= 55:
             goals_selection = "Over 2.5 Goals"
             goals_confidence = over_confidence * 0.9
@@ -129,6 +136,7 @@ class AdvancedUnderstatPredictor:
             goals_selection = "Under 2.5 Goals"
             goals_confidence = (100 - over_confidence) * 0.9
         else:
+            # Between 45-55% is "Avoid" territory
             goals_selection = "Avoid Total Goals"
             goals_confidence = 42
         
