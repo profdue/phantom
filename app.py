@@ -4,11 +4,10 @@ import os
 from models import AdvancedUnderstatPredictor
 from utils import (
     validate_input_data,
-    get_league_adjustments,
-    calculate_team_specific_adjustments,
     format_prediction_display,
     load_league_data,
-    get_available_leagues
+    get_available_leagues,
+    detect_league_from_filename
 )
 from betting_advisor import BettingAdvisor
 
@@ -39,15 +38,20 @@ def main():
             if league_data is not None:
                 st.session_state.league_data = league_data
                 st.session_state.selected_league = selected_league
-                st.sidebar.success(f"✅ Loaded {selected_league}")
+                
+                # Detect and store league
+                detected_league = detect_league_from_filename(selected_league)
+                st.session_state.detected_league = detected_league
+                st.sidebar.success(f"✅ Loaded {selected_league} ({detected_league})")
                 st.rerun()
             else:
                 st.sidebar.error(f"❌ Failed to load {selected_league} data")
     
     st.sidebar.markdown("---")
     
-    if 'selected_league' in st.session_state:
+    if 'selected_league' in st.session_state and 'detected_league' in st.session_state:
         st.sidebar.info(f"**Current League:** {st.session_state.selected_league}")
+        st.sidebar.info(f"**League Type:** {st.session_state.detected_league}")
     
     st.sidebar.markdown("---")
     st.sidebar.info("""
@@ -86,7 +90,7 @@ def main():
             home_teams_data['Team'] == home_team
         ].iloc[0]
         
-        # Convert to dictionary for model (include all CSV columns)
+        # Convert to dictionary for model
         home_data = {
             "points": int(home_team_data['Points']),
             "goals_scored": int(home_team_data['Goals']),
@@ -100,7 +104,6 @@ def main():
             "Losses": int(home_team_data['Losses']),
             "Goals": int(home_team_data['Goals']),
             "Goals_Against": int(home_team_data['Goals_Against']),
-            # Include team profile columns
             "Team_Avg_Total_Goals": float(home_team_data.get('Team_Avg_Total_Goals', 2.7)),
             "Team_Goals_Conceded_PG": float(home_team_data.get('Team_Goals_Conceded_PG', home_team_data.get('goals_conceded_pg', 1.3))),
             "Home_Away_Goal_Diff": float(home_team_data.get('Home_Away_Goal_Diff', 0.0))
@@ -113,7 +116,6 @@ def main():
         st.write(f"**xG:** {float(home_team_data['xG']):.2f}, **xGA:** {float(home_team_data['xGA']):.2f}")
         st.write(f"**Points:** {int(home_team_data['Points'])}, **xPTS:** {float(home_team_data['xPTS']):.2f}")
         
-        # Show team profile data if available
         if 'Team_Avg_Total_Goals' in home_team_data:
             st.caption(f"📊 Team Profile: Avg {home_team_data['Team_Avg_Total_Goals']:.1f} total goals, concedes {home_team_data.get('Team_Goals_Conceded_PG', home_team_data.get('goals_conceded_pg', 1.3)):.1f} PG")
     
@@ -135,7 +137,7 @@ def main():
             away_teams_data['Team'] == away_team
         ].iloc[0]
         
-        # Convert to dictionary for model (include all CSV columns)
+        # Convert to dictionary for model
         away_data = {
             "points": int(away_team_data['Points']),
             "goals_scored": int(away_team_data['Goals']),
@@ -149,7 +151,6 @@ def main():
             "Losses": int(away_team_data['Losses']),
             "Goals": int(away_team_data['Goals']),
             "Goals_Against": int(away_team_data['Goals_Against']),
-            # Include team profile columns
             "Team_Avg_Total_Goals": float(away_team_data.get('Team_Avg_Total_Goals', 2.7)),
             "Team_Goals_Conceded_PG": float(away_team_data.get('Team_Goals_Conceded_PG', away_team_data.get('goals_conceded_pg', 1.3))),
             "Home_Away_Goal_Diff": float(away_team_data.get('Home_Away_Goal_Diff', 0.0))
@@ -162,7 +163,6 @@ def main():
         st.write(f"**xG:** {float(away_team_data['xG']):.2f}, **xGA:** {float(away_team_data['xGA']):.2f}")
         st.write(f"**Points:** {int(away_team_data['Points'])}, **xPTS:** {float(away_team_data['xPTS']):.2f}")
         
-        # Show team profile data if available
         if 'Team_Avg_Total_Goals' in away_team_data:
             st.caption(f"📊 Team Profile: Avg {away_team_data['Team_Avg_Total_Goals']:.1f} total goals, concedes {away_team_data.get('Team_Goals_Conceded_PG', away_team_data.get('goals_conceded_pg', 1.3)):.1f} PG")
     
@@ -190,9 +190,13 @@ def run_analysis(predictor, home_data, away_data, home_team, away_team, games_pl
         st.info("Please check your input values and try again.")
         return
     
-    with st.spinner("Running advanced probabilistic models..."):
+    # Get league from session state
+    league = st.session_state.get('detected_league', 'Average')
+    
+    with st.spinner(f"Running {league} league analysis..."):
         result = predictor.calculate_advanced_analysis(
-            home_data, away_data, home_team, away_team, games_played
+            home_data, away_data, home_team, away_team, games_played,
+            league_name=league
         )
     
     display_results(result, games_played)
@@ -205,10 +209,14 @@ def run_betting_advisor(predictor, betting_advisor, home_data, away_data, home_t
         st.info("Please check your input values and try again.")
         return
     
+    # Get league from session state
+    league = st.session_state.get('detected_league', 'Average')
+    
     with st.spinner("Analyzing for profitable betting opportunities..."):
         # First get model predictions
         result = predictor.calculate_advanced_analysis(
-            home_data, away_data, home_team, away_team, games_played
+            home_data, away_data, home_team, away_team, games_played,
+            league_name=league
         )
         
         # Then analyze with betting advisor
@@ -226,7 +234,7 @@ def run_betting_advisor(predictor, betting_advisor, home_data, away_data, home_t
         # Show advisor performance summary
         with st.expander("📈 Advisor Performance Summary"):
             summary = betting_advisor.get_performance_summary()
-            if summary:  # Check if summary exists
+            if summary:
                 st.write(f"**Matches Analyzed:** {summary.get('total_matches_analyzed', 0)}")
                 st.write(f"**Total Recommendations:** {summary.get('total_recommendations', 0)}")
                 st.write(f"**Strong Bets:** {summary.get('total_strong_bets', 0)}")
@@ -263,6 +271,7 @@ def display_results(result, games_played):
         st.metric("Total Advantage", f"{result['analysis']['total_advantage']:+.1f}")
         st.caption(f"Home boost: +{((result['analysis']['home_boost']-1)*100):.0f}%")
         st.caption(f"Based on {games_played} matches")
+        st.caption(f"League: {result.get('league', 'Average')}")
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -271,6 +280,8 @@ def display_results(result, games_played):
         st.metric("Away xG", f"{result['analysis']['expected_goals']['away']:.2f}")
     with col3:
         st.metric("Total xG", f"{result['analysis']['expected_goals']['total']:.2f}")
+        if 'league_settings' in result['analysis']:
+            st.caption(f"League avg: {result['analysis']['league_settings']['avg_goals']}")
     with col4:
         st.metric("xG Difference", f"{result['analysis']['expected_goal_diff']:+.2f}")
     
@@ -292,6 +303,12 @@ def display_results(result, games_played):
             st.write(f"BTTS Raw: {result['analysis']['probabilities']['btts_raw']:.0f}%")
             if result['analysis']['probabilities']['btts_adjust_note']:
                 st.write(f"BTTS Adjustment: {result['analysis']['probabilities']['btts_adjust_note']}")
+            
+            if 'league_settings' in result['analysis']:
+                st.write(f"**League Settings:**")
+                st.write(f"Avg Goals: {result['analysis']['league_settings']['avg_goals']}")
+                st.write(f"Over Threshold: {result['analysis']['league_settings']['over_threshold']}")
+                st.write(f"Under Threshold: {result['analysis']['league_settings']['under_threshold']}")
     
     st.subheader("💎 Model Predictions")
     
@@ -334,11 +351,17 @@ def display_methodology():
         **EMPIRICALLY CALIBRATED xG-Based Football Predictor**
         
         **Key Improvements (Based on 13-match analysis):**
-        1. **Empirical Probability Calibration**: 85% predictions reduced to max 75%
-        2. **Conservative Home Advantage**: 1-2.5% boost instead of 1-3%
-        3. **Variance Buffers**: Asian Handicap predictions include match variance factors
-        4. **Reduced Mismatch Penalty**: BTTS less aggressively adjusted for unbalanced matches
-        5. **Realistic Quality Assessment**: Removed systematic home team bias
+        1. **League-Specific Calibration:** Different thresholds for each league
+        2. **Conservative Home Advantage:** Adjusted by league tendencies
+        3. **Historical Context:** Blends xG with historical team averages
+        4. **Realistic Quality Assessment:** Proper mismatch detection
+        
+        **League-Specific Settings:**
+        - Bundesliga: 3.14 avg goals, Over threshold = 3.0
+        - Premier League: 2.93 avg goals, Over threshold = 2.8  
+        - Serie A: 2.56 avg goals, Over threshold = 2.45
+        - La Liga: 2.62 avg goals, Over threshold = 2.5
+        - Ligue 1: 2.96 avg goals, Over threshold = 2.85
         
         **Using Home/Away Specific Data:**
         - Home team stats: Only home matches
@@ -348,28 +371,16 @@ def display_methodology():
         **Core Methodology:**
         - Expected Goals (xG) as primary input
         - Poisson distribution for BTTS probabilities
-        - Conservative home advantage (1-2.5% based on matchup)
-        - Empirical calibration based on actual match results
-        
-        **Betting Advisor Module:**
-        - Applies strategic filters to model predictions
-        - Identifies proven profitable markets (Total Goals: 69% accuracy)
-        - Fades overconfident predictions (>80% confidence → 40% actual)
-        - Avoids weak markets (Asian Handicap: 31% accuracy)
-        
-        **Expected Performance (After Fixes):**
-        - Match Winner: Target 58-63% accuracy
-        - Total Goals: Maintain 65-70% accuracy  
-        - BTTS: Target 50-55% accuracy
-        - Asian Handicap: Target 45-50% accuracy
+        - League-specific home advantage
+        - Historical team performance blending
         """)
     
     st.info("""
     **⚡ Important Notes:**
-    - This model uses separate home/away statistics for accuracy
+    - This model uses league-specific settings for accuracy
     - All predictions are probabilistic assessments
-    - Betting Advisor applies empirical filters based on historical performance
-    - Updated calibration based on 13-match analysis
+    - Betting Advisor applies strategic filters
+    - Different leagues have different scoring patterns
     """)
 
 if __name__ == "__main__":
