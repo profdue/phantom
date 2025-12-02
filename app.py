@@ -1,387 +1,171 @@
-import streamlit as st
-import pandas as pd
-import os
-from models import AdvancedUnderstatPredictor
-from utils import (
-    validate_input_data,
-    format_prediction_display,
-    load_league_data,
-    get_available_leagues,
-    detect_league_from_filename
-)
+"""
+Main application entry point
+"""
+import argparse
+from data_loader import DataLoader
+from models import MatchPredictor, TeamProfile
 from betting_advisor import BettingAdvisor
+from utils import PredictionUtils
+
+class PhantomPredictor:
+    """Main application class"""
+    
+    def __init__(self, data_dir="data"):
+        self.data_loader = DataLoader(data_dir)
+        self.utils = PredictionUtils()
+        self.advisor = BettingAdvisor()
+    
+    def predict_match(self, league_name, home_team_name, away_team_name):
+        """Make prediction for a specific match"""
+        try:
+            # Load team profiles
+            home_team = self.data_loader.get_team_profile(home_team_name, league_name, is_home=True)
+            away_team = self.data_loader.get_team_profile(away_team_name, league_name, is_home=False)
+            
+            # Create predictor
+            predictor = MatchPredictor(league_name)
+            
+            # Generate prediction
+            result = predictor.predict(home_team, away_team)
+            
+            # Add team names to analysis
+            result['analysis']['home_team'] = home_team_name
+            result['analysis']['away_team'] = away_team_name
+            
+            # Generate betting advice
+            advice = self.advisor.generate_advice(result['predictions'])
+            result['betting_advice'] = advice
+            
+            # Format output
+            formatted = self.utils.format_prediction_output(result)
+            
+            return formatted
+            
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def list_available_leagues(self):
+        """List all available leagues"""
+        return list(self.data_loader.available_leagues.keys())
+    
+    def list_teams_in_league(self, league_name):
+        """List all teams in a league"""
+        return self.data_loader.get_all_teams(league_name)
+    
+    def interactive_mode(self):
+        """Run in interactive mode"""
+        print("⚽ PHANTOM PREDICTOR v2.3 ⚽")
+        print("=" * 40)
+        
+        # List leagues
+        leagues = self.list_available_leagues()
+        print("\nAvailable Leagues:")
+        for i, league in enumerate(leagues, 1):
+            print(f"{i}. {league}")
+        
+        # Select league
+        league_choice = int(input("\nSelect league number: ")) - 1
+        league_name = leagues[league_choice]
+        
+        # List teams
+        teams = self.list_teams_in_league(league_name)
+        print(f"\nTeams in {league_name}:")
+        for i, team in enumerate(teams, 1):
+            print(f"{i}. {team}")
+        
+        # Select teams
+        home_idx = int(input("\nSelect home team number: ")) - 1
+        away_idx = int(input("Select away team number: ")) - 1
+        
+        home_team = teams[home_idx]
+        away_team = teams[away_idx]
+        
+        print(f"\n🔮 Predicting: {home_team} vs {away_team}")
+        print("=" * 40)
+        
+        # Make prediction
+        result = self.predict_match(league_name, home_team, away_team)
+        
+        if 'error' in result:
+            print(f"Error: {result['error']}")
+            return
+        
+        # Display results
+        self._display_prediction(result)
+    
+    def _display_prediction(self, result):
+        """Display prediction results nicely"""
+        analysis = result['analysis']
+        predictions = result['predictions']
+        advice = result['betting_advice']
+        
+        print(f"\n📊 ANALYSIS ({analysis['league']})")
+        print(f"Quality Ratings: {analysis['quality_ratings']['home']} vs {analysis['quality_ratings']['away']}")
+        print(f"Expected Goals: {analysis['expected_goals']['home']} - {analysis['expected_goals']['away']} (Total: {analysis['expected_goals']['total']})")
+        
+        print(f"\n🎯 PREDICTIONS")
+        for pred in predictions:
+            stake = BettingAdvisor.get_stake_recommendation(pred['confidence'])
+            print(f"{pred['type']}: {pred['selection']} ({pred['confidence']}%) {stake['color']} {stake['units']} units")
+        
+        print(f"\n💰 BETTING ADVICE")
+        print(advice['summary'])
+        
+        if advice['strong_plays']:
+            print("\nStrong Plays:")
+            for play in advice['strong_plays']:
+                print(f"  • {play['market']}: {play['selection']}")
+        
+        if advice['moderate_plays']:
+            print("\nModerate Plays:")
+            for play in advice['moderate_plays']:
+                print(f"  • {play['market']}: {play['selection']}")
+        
+        if advice['avoid']:
+            print(f"\nAvoid: {', '.join(advice['avoid'])}")
+        
+        print(f"\n📈 Expected Scoreline: Based on xG, expect a {self._estimate_scoreline(analysis['expected_goals'])} result")
+    
+    def _estimate_scoreline(self, xg_data):
+        """Estimate most likely scoreline from xG"""
+        home_xg = xg_data['home']
+        away_xg = xg_data['away']
+        
+        # Simple rounding for display
+        home_est = round(home_xg)
+        away_est = round(away_xg)
+        
+        # Ensure at least 1 goal if xG > 0.5
+        if home_xg > 0.5 and home_est == 0:
+            home_est = 1
+        if away_xg > 0.5 and away_est == 0:
+            away_est = 1
+        
+        return f"{home_est}-{away_est}"
+
 
 def main():
-    st.set_page_config(page_title="Advanced xG Predictor", page_icon="📊", layout="wide")
-    st.title("📊 Advanced xG Football Predictor")
-    st.markdown("**Probabilistic Modeling • Dynamic Analysis • Evidence-Based Predictions**")
+    parser = argparse.ArgumentParser(description="Phantom Prediction System v2.3")
+    parser.add_argument("--league", help="League name")
+    parser.add_argument("--home", help="Home team name")
+    parser.add_argument("--away", help="Away team name")
+    parser.add_argument("--interactive", action="store_true", help="Run in interactive mode")
     
-    predictor = AdvancedUnderstatPredictor()
-    betting_advisor = BettingAdvisor()
+    args = parser.parse_args()
     
-    # Sidebar with league selection
-    st.sidebar.header("📂 Load League Data")
+    predictor = PhantomPredictor()
     
-    leagues = get_available_leagues()
-    
-    if not leagues:
-        st.sidebar.error("No CSV files found in data folder.")
-        st.sidebar.info("Please ensure CSV files are in the 'data' folder.")
-        display_methodology()
-        return
-    
-    selected_league = st.sidebar.selectbox("Select League:", leagues)
-    
-    if st.sidebar.button("📥 Load League Data", type="primary"):
-        with st.spinner(f"Loading {selected_league} data..."):
-            league_data = load_league_data(selected_league)
-            if league_data is not None:
-                st.session_state.league_data = league_data
-                st.session_state.selected_league = selected_league
-                
-                # Detect and store league
-                detected_league = detect_league_from_filename(selected_league)
-                st.session_state.detected_league = detected_league
-                st.sidebar.success(f"✅ Loaded {selected_league} ({detected_league})")
-                st.rerun()
-            else:
-                st.sidebar.error(f"❌ Failed to load {selected_league} data")
-    
-    st.sidebar.markdown("---")
-    
-    if 'selected_league' in st.session_state and 'detected_league' in st.session_state:
-        st.sidebar.info(f"**Current League:** {st.session_state.selected_league}")
-        st.sidebar.info(f"**League Type:** {st.session_state.detected_league}")
-    
-    st.sidebar.markdown("---")
-    st.sidebar.info("""
-    **Using Home/Away Data:**
-    - Teams perform differently at home vs away
-    - More accurate predictions
-    - Realistic scoring expectations
-    """)
-    
-    # Check if data is loaded
-    if 'league_data' not in st.session_state:
-        st.info("👈 Please load league data from the sidebar to get started.")
-        display_methodology()
-        return
-    
-    # Main input section with team selection
-    st.subheader("📊 Select Match")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 🏠 Home Team")
-        
-        home_teams_data = st.session_state.league_data[
-            st.session_state.league_data['Home_Away'] == 'Home'
-        ]
-        
-        if home_teams_data.empty:
-            st.error("No home team data available in the loaded file.")
-            return
-        
-        home_teams = sorted(home_teams_data['Team'].unique())
-        home_team = st.selectbox("Select Home Team:", home_teams, key="home_select")
-        
-        home_team_data = home_teams_data[
-            home_teams_data['Team'] == home_team
-        ].iloc[0]
-        
-        # Convert to dictionary for model
-        home_data = {
-            "points": int(home_team_data['Points']),
-            "goals_scored": int(home_team_data['Goals']),
-            "goals_conceded": int(home_team_data['Goals_Against']),
-            "xG": float(home_team_data['xG']),
-            "xGA": float(home_team_data['xGA']),
-            "xPTS": float(home_team_data['xPTS']),
-            "Matches": int(home_team_data['Matches']),
-            "Wins": int(home_team_data['Wins']),
-            "Draws": int(home_team_data['Draws']),
-            "Losses": int(home_team_data['Losses']),
-            "Goals": int(home_team_data['Goals']),
-            "Goals_Against": int(home_team_data['Goals_Against']),
-            "Team_Avg_Total_Goals": float(home_team_data.get('Team_Avg_Total_Goals', 2.7)),
-            "Team_Goals_Conceded_PG": float(home_team_data.get('Team_Goals_Conceded_PG', home_team_data.get('goals_conceded_pg', 1.3))),
-            "Home_Away_Goal_Diff": float(home_team_data.get('Home_Away_Goal_Diff', 0.0))
-        }
-        
-        # Display stats
-        st.write(f"**Matches:** {int(home_team_data['Matches'])}")
-        st.write(f"**Record:** {int(home_team_data['Wins'])}-{int(home_team_data['Draws'])}-{int(home_team_data['Losses'])}")
-        st.write(f"**Goals:** {int(home_team_data['Goals'])}F, {int(home_team_data['Goals_Against'])}A")
-        st.write(f"**xG:** {float(home_team_data['xG']):.2f}, **xGA:** {float(home_team_data['xGA']):.2f}")
-        st.write(f"**Points:** {int(home_team_data['Points'])}, **xPTS:** {float(home_team_data['xPTS']):.2f}")
-        
-        if 'Team_Avg_Total_Goals' in home_team_data:
-            st.caption(f"📊 Team Profile: Avg {home_team_data['Team_Avg_Total_Goals']:.1f} total goals, concedes {home_team_data.get('Team_Goals_Conceded_PG', home_team_data.get('goals_conceded_pg', 1.3)):.1f} PG")
-    
-    with col2:
-        st.markdown("### ✈️ Away Team")
-        
-        away_teams_data = st.session_state.league_data[
-            st.session_state.league_data['Home_Away'] == 'Away'
-        ]
-        
-        if away_teams_data.empty:
-            st.error("No away team data available in the loaded file.")
-            return
-        
-        away_teams = sorted(away_teams_data['Team'].unique())
-        away_team = st.selectbox("Select Away Team:", away_teams, key="away_select")
-        
-        away_team_data = away_teams_data[
-            away_teams_data['Team'] == away_team
-        ].iloc[0]
-        
-        # Convert to dictionary for model
-        away_data = {
-            "points": int(away_team_data['Points']),
-            "goals_scored": int(away_team_data['Goals']),
-            "goals_conceded": int(away_team_data['Goals_Against']),
-            "xG": float(away_team_data['xG']),
-            "xGA": float(away_team_data['xGA']),
-            "xPTS": float(away_team_data['xPTS']),
-            "Matches": int(away_team_data['Matches']),
-            "Wins": int(away_team_data['Wins']),
-            "Draws": int(away_team_data['Draws']),
-            "Losses": int(away_team_data['Losses']),
-            "Goals": int(away_team_data['Goals']),
-            "Goals_Against": int(away_team_data['Goals_Against']),
-            "Team_Avg_Total_Goals": float(away_team_data.get('Team_Avg_Total_Goals', 2.7)),
-            "Team_Goals_Conceded_PG": float(away_team_data.get('Team_Goals_Conceded_PG', away_team_data.get('goals_conceded_pg', 1.3))),
-            "Home_Away_Goal_Diff": float(away_team_data.get('Home_Away_Goal_Diff', 0.0))
-        }
-        
-        # Display stats
-        st.write(f"**Matches:** {int(away_team_data['Matches'])}")
-        st.write(f"**Record:** {int(away_team_data['Wins'])}-{int(away_team_data['Draws'])}-{int(away_team_data['Losses'])}")
-        st.write(f"**Goals:** {int(away_team_data['Goals'])}F, {int(away_team_data['Goals_Against'])}A")
-        st.write(f"**xG:** {float(away_team_data['xG']):.2f}, **xGA:** {float(away_team_data['xGA']):.2f}")
-        st.write(f"**Points:** {int(away_team_data['Points'])}, **xPTS:** {float(away_team_data['xPTS']):.2f}")
-        
-        if 'Team_Avg_Total_Goals' in away_team_data:
-            st.caption(f"📊 Team Profile: Avg {away_team_data['Team_Avg_Total_Goals']:.1f} total goals, concedes {away_team_data.get('Team_Goals_Conceded_PG', away_team_data.get('goals_conceded_pg', 1.3)):.1f} PG")
-    
-    games_played = min(int(home_team_data['Matches']), int(away_team_data['Matches']))
-    
-    # Two buttons - one for analysis, one for betting recommendations
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("📈 Generate Advanced Analysis", type="primary", use_container_width=True):
-            run_analysis(predictor, home_data, away_data, home_team, away_team, games_played)
-    
-    with col2:
-        if st.button("🎯 Get Betting Recommendations", type="secondary", use_container_width=True):
-            run_betting_advisor(predictor, betting_advisor, home_data, away_data, home_team, away_team, games_played)
-    
-    # Model methodology section
-    display_methodology()
-
-def run_analysis(predictor, home_data, away_data, home_team, away_team, games_played):
-    """Run the model analysis and display results"""
-    is_valid, error_msg = validate_input_data(home_data, away_data, games_played)
-    if not is_valid:
-        st.error(f"❌ Data validation failed: {error_msg}")
-        st.info("Please check your input values and try again.")
-        return
-    
-    # Get league from session state
-    league = st.session_state.get('detected_league', 'Average')
-    
-    with st.spinner(f"Running {league} league analysis..."):
-        result = predictor.calculate_advanced_analysis(
-            home_data, away_data, home_team, away_team, games_played,
-            league_name=league
-        )
-    
-    display_results(result, games_played)
-
-def run_betting_advisor(predictor, betting_advisor, home_data, away_data, home_team, away_team, games_played):
-    """Run model analysis THROUGH betting advisor for recommendations"""
-    is_valid, error_msg = validate_input_data(home_data, away_data, games_played)
-    if not is_valid:
-        st.error(f"❌ Data validation failed: {error_msg}")
-        st.info("Please check your input values and try again.")
-        return
-    
-    # Get league from session state
-    league = st.session_state.get('detected_league', 'Average')
-    
-    with st.spinner("Analyzing for profitable betting opportunities..."):
-        # First get model predictions
-        result = predictor.calculate_advanced_analysis(
-            home_data, away_data, home_team, away_team, games_played,
-            league_name=league
-        )
-        
-        # Then analyze with betting advisor
-        recommendations = betting_advisor.analyze_predictions(result)
-        
-        # Display both model predictions AND advisor recommendations
-        st.subheader("📊 Model Predictions (Raw)")
-        display_results_compact(result, games_played)
-        
-        st.subheader("🎯 Betting Advisor Recommendations")
-        
-        advisor_display = betting_advisor.display_recommendations(recommendations)
-        st.markdown(advisor_display)
-        
-        # Show advisor performance summary
-        with st.expander("📈 Advisor Performance Summary"):
-            summary = betting_advisor.get_performance_summary()
-            if summary:
-                st.write(f"**Matches Analyzed:** {summary.get('total_matches_analyzed', 0)}")
-                st.write(f"**Total Recommendations:** {summary.get('total_recommendations', 0)}")
-                st.write(f"**Strong Bets:** {summary.get('total_strong_bets', 0)}")
-                st.write(f"**Avg Recommendations per Match:** {summary.get('avg_recommendations_per_match', 0):.1f}")
-                
-                if 'avg_strong_bets_per_match' in summary:
-                    st.write(f"**Avg Strong Bets per Match:** {summary['avg_strong_bets_per_match']:.1f}")
-            else:
-                st.write("No performance data available yet.")
-
-def display_results(result, games_played):
-    """Display the analysis results in Streamlit"""
-    st.subheader("📊 Advanced Analysis")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        delta_home = result['analysis']['home_quality'] - 2.0
-        st.metric("Home Quality", f"{result['analysis']['home_quality']:.1f}", 
-                 f"{delta_home:+.1f}", delta_color="normal")
-        if result['raw_data']['home_overperformance'] > 0.1:
-            st.caption(f"📈 +{result['raw_data']['home_overperformance']:.1f} overperformance")
-    
-    with col2:
-        delta_away = result['analysis']['away_quality'] - 2.0
-        st.metric("Away Quality", f"{result['analysis']['away_quality']:.1f}",
-                 f"{delta_away:+.1f}", delta_color="normal")
-        if result['raw_data']['away_overperformance'] > 0.1:
-            st.caption(f"📈 +{result['raw_data']['away_overperformance']:.1f} overperformance")
-    
-    with col3:
-        st.metric("Quality Gap", f"{result['analysis']['quality_diff']:+.1f}")
-    
-    with col4:
-        st.metric("Total Advantage", f"{result['analysis']['total_advantage']:+.1f}")
-        st.caption(f"Home boost: +{((result['analysis']['home_boost']-1)*100):.0f}%")
-        st.caption(f"Based on {games_played} matches")
-        st.caption(f"League: {result.get('league', 'Average')}")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Home xG", f"{result['analysis']['expected_goals']['home']:.2f}")
-    with col2:
-        st.metric("Away xG", f"{result['analysis']['expected_goals']['away']:.2f}")
-    with col3:
-        st.metric("Total xG", f"{result['analysis']['expected_goals']['total']:.2f}")
-        if 'league_settings' in result['analysis']:
-            st.caption(f"League avg: {result['analysis']['league_settings']['avg_goals']}")
-    with col4:
-        st.metric("xG Difference", f"{result['analysis']['expected_goal_diff']:+.2f}")
-    
-    with st.expander("📋 Detailed Metrics", expanded=False):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write("**Performance Factors**")
-            st.write(f"Home Momentum: {result['analysis']['home_momentum']:.1f}")
-            st.write(f"Away Momentum: {result['analysis']['away_momentum']:.1f}")
-            st.write(f"Home Intangible Bonus: {result['analysis']['home_intangible']:.2f}")
-            st.write(f"Away Intangible Bonus: {result['analysis']['away_intangible']:.2f}")
-            
-            if result['analysis']['volatility_note']:
-                st.write(f"📊 **Volatility Note:** {result['analysis']['volatility_note']}")
-        
-        with col2:
-            st.write("**Probability Analysis**")
-            st.write(f"Over 2.5 Base: {result['analysis']['probabilities']['over_25']:.0f}%")
-            st.write(f"BTTS Raw: {result['analysis']['probabilities']['btts_raw']:.0f}%")
-            if result['analysis']['probabilities']['btts_adjust_note']:
-                st.write(f"BTTS Adjustment: {result['analysis']['probabilities']['btts_adjust_note']}")
-            
-            if 'league_settings' in result['analysis']:
-                st.write(f"**League Settings:**")
-                st.write(f"Avg Goals: {result['analysis']['league_settings']['avg_goals']}")
-                st.write(f"Over Threshold: {result['analysis']['league_settings']['over_threshold']}")
-                st.write(f"Under Threshold: {result['analysis']['league_settings']['under_threshold']}")
-    
-    st.subheader("💎 Model Predictions")
-    
-    for pred in result['predictions']:
-        color, stake, description, reasoning = format_prediction_display(
-            pred, result['analysis'], result['team_names'], result['raw_data']
-        )
-        
-        with st.expander(f"{color} {pred['type']}: {pred['selection']} ({pred['confidence']:.0f}%) - {stake}"):
-            st.write(description)
-            st.write(reasoning)
-            
-            prob = pred['confidence'] / 100
-            st.progress(prob, text=f"Confidence Level: {pred['confidence']:.0f}%")
-
-def display_results_compact(result, games_played):
-    """Display compact version of results for betting advisor view"""
-    cols = st.columns(4)
-    with cols[0]:
-        st.metric("Home Quality", f"{result['analysis']['home_quality']:.1f}")
-    with cols[1]:
-        st.metric("Away Quality", f"{result['analysis']['away_quality']:.1f}")
-    with cols[2]:
-        st.metric("Total xG", f"{result['analysis']['expected_goals']['total']:.2f}")
-    with cols[3]:
-        st.metric("xG Diff", f"{result['analysis']['expected_goal_diff']:+.2f}")
-    
-    for pred in result['predictions']:
-        color, stake, description, reasoning = format_prediction_display(
-            pred, result['analysis'], result['team_names'], result['raw_data']
-        )
-        st.caption(f"{color} {pred['type']}: {pred['selection']} ({pred['confidence']:.0f}%) - {stake}")
-
-def display_methodology():
-    """Display model methodology section"""
-    st.subheader("📖 Model Methodology")
-    
-    with st.expander("Learn how this model works", expanded=False):
-        st.write("""
-        **EMPIRICALLY CALIBRATED xG-Based Football Predictor**
-        
-        **Key Improvements (Based on 13-match analysis):**
-        1. **League-Specific Calibration:** Different thresholds for each league
-        2. **Conservative Home Advantage:** Adjusted by league tendencies
-        3. **Historical Context:** Blends xG with historical team averages
-        4. **Realistic Quality Assessment:** Proper mismatch detection
-        
-        **League-Specific Settings:**
-        - Bundesliga: 3.14 avg goals, Over threshold = 3.0
-        - Premier League: 2.93 avg goals, Over threshold = 2.8  
-        - Serie A: 2.56 avg goals, Over threshold = 2.45
-        - La Liga: 2.62 avg goals, Over threshold = 2.5
-        - Ligue 1: 2.96 avg goals, Over threshold = 2.85
-        
-        **Using Home/Away Specific Data:**
-        - Home team stats: Only home matches
-        - Away team stats: Only away matches
-        - More accurate than combined season stats
-        
-        **Core Methodology:**
-        - Expected Goals (xG) as primary input
-        - Poisson distribution for BTTS probabilities
-        - League-specific home advantage
-        - Historical team performance blending
-        """)
-    
-    st.info("""
-    **⚡ Important Notes:**
-    - This model uses league-specific settings for accuracy
-    - All predictions are probabilistic assessments
-    - Betting Advisor applies strategic filters
-    - Different leagues have different scoring patterns
-    """)
+    if args.interactive:
+        predictor.interactive_mode()
+    elif args.league and args.home and args.away:
+        result = predictor.predict_match(args.league, args.home, args.away)
+        if 'error' in result:
+            print(f"Error: {result['error']}")
+        else:
+            predictor._display_prediction(result)
+    else:
+        print("Please use --interactive or provide --league, --home, and --away arguments")
+        print("Example: python app.py --league premier_league --home \"Man City\" --away \"Liverpool\"")
 
 if __name__ == "__main__":
     main()
