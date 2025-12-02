@@ -1,185 +1,315 @@
+"""
+Prediction model classes implementing v2.3 logic
+"""
+import math
 import numpy as np
-from typing import Dict, List, Tuple
-from utils import (
-    calculate_btts_poisson_probability,
-    calculate_btts_decision,
-    get_league_settings,  # FIXED IMPORT
-    calculate_team_specific_adjustments
-)
+from config import LEAGUE_CONFIGS, MODEL_PARAMS
 
-class AdvancedUnderstatPredictor:
-    def __init__(self):
-        self.predictions_history = []
-        self.team_profiles = {}
+class TeamProfile:
+    """Represents a team's statistical profile"""
     
-    def load_team_profile(self, team_name: str, csv_row: Dict):
-        """Extract team-specific profile from CSV data"""
-        if team_name not in self.team_profiles:
-            goals_conceded_pg = csv_row.get('Team_Goals_Conceded_PG', 
-                                           csv_row.get('goals_conceded_pg', 1.3))
-            
-            matches = max(1, csv_row.get('Matches', 1))
-            
-            self.team_profiles[team_name] = {
-                'avg_total_goals': csv_row.get('Team_Avg_Total_Goals', 2.7),
-                'goals_conceded_pg': goals_conceded_pg,
-                'home_away_goal_diff': csv_row.get('Home_Away_Goal_Diff', 0.0),
-                'offensive_rating': csv_row.get('Goals', 0) / matches,
-                'defensive_rating': 2.0 - (csv_row.get('Goals_Against', 0) / matches),
-                'xg_per_game': csv_row.get('xG', 0) / matches,
-                'xga_per_game': csv_row.get('xGA', 0) / matches,
-                'matches': matches
-            }
+    def __init__(self, data_dict, is_home=True):
+        self.name = data_dict['Team']
+        self.is_home = is_home
+        
+        # Core stats
+        self.matches = int(data_dict['Matches'])
+        self.wins = int(data_dict['Wins'])
+        self.draws = int(data_dict['Draws'])
+        self.losses = int(data_dict['Losses'])
+        self.goals_for = int(data_dict['Goals'])
+        self.goals_against = int(data_dict['Goals_Against'])
+        self.points = int(data_dict['Points'])
+        
+        # Advanced metrics
+        self.xg = float(data_dict['xG'])
+        self.xga = float(data_dict['xGA'])
+        self.xpts = float(data_dict['xPTS'])
+        
+        # Calculated per-game averages
+        self.goals_pg = self.goals_for / self.matches if self.matches > 0 else 0
+        self.goals_against_pg = self.goals_against / self.matches if self.matches > 0 else 0
+        self.xg_pg = self.xg / self.matches if self.matches > 0 else 0
+        self.xga_pg = self.xga / self.matches if self.matches > 0 else 0
+        
+        # Last 5 form data
+        if is_home:
+            self.last5_wins = int(data_dict['Last5_Home_Wins'])
+            self.last5_draws = int(data_dict['Last5_Home_Draws'])
+            self.last5_losses = int(data_dict['Last5_Home_Losses'])
+            self.last5_gf = int(data_dict['Last5_Home_GF'])
+            self.last5_ga = int(data_dict['Last5_Home_GA'])
+            self.last5_gd = int(data_dict['Last5_Home_GD'])
+            self.last5_pts = int(data_dict['Last5_Home_PTS'])
+        else:
+            self.last5_wins = int(data_dict['Last5_Away_Wins'])
+            self.last5_draws = int(data_dict['Last5_Away_Draws'])
+            self.last5_losses = int(data_dict['Last5_Away_Losses'])
+            self.last5_gf = int(data_dict['Last5_Away_GF'])
+            self.last5_ga = int(data_dict['Last5_Away_GA'])
+            self.last5_gd = int(data_dict['Last5_Away_GD'])
+            self.last5_pts = int(data_dict['Last5_Away_PTS'])
+        
+        # Calculate flags
+        self.has_attack_crisis = self._check_attack_crisis()
+        self.has_defense_crisis = self._check_defense_crisis()
+        self.form_momentum = self._calculate_momentum()
+        
+    def _check_attack_crisis(self):
+        """Detect if team is in attacking crisis"""
+        if self.xg_pg < MODEL_PARAMS['attack_crisis_threshold']:
+            if self.last5_gf / 5 < 0.5:  # Less than 0.5 goals per game in last 5
+                if self.last5_losses >= 2:  # Losing streak
+                    return True
+        return False
     
-    def calculate_advanced_analysis(self, home_data: Dict, away_data: Dict, 
-                                   home_team: str, away_team: str, 
-                                   games_played: int = 12,
-                                   league_name: str = 'Average') -> Dict:
-        """Advanced xG-based football predictor with LEAGUE-SPECIFIC adjustments"""
+    def _check_defense_crisis(self):
+        """Detect if team is in defensive crisis"""
+        return self.goals_against_pg > MODEL_PARAMS['defense_crisis_threshold']
+    
+    def _calculate_momentum(self):
+        """Calculate form momentum (0 to 0.3 scale)"""
+        max_possible_pts = 15  # 5 matches × 3 points
+        if max_possible_pts > 0:
+            momentum = (self.last5_pts / max_possible_pts) * MODEL_PARAMS.get('momentum_weight', 0.3)
+            return min(0.3, momentum)  # Cap at 0.3
+        return 0.0
+    
+    def get_clean_sheet_probability(self, opponent_xg):
+        """Calculate probability of keeping clean sheet"""
+        if opponent_xg > 0:
+            return math.exp(-opponent_xg) * 100
+        return 0.0
+
+
+class MatchPredictor:
+    """Main prediction engine implementing v2.3 logic"""
+    
+    def __init__(self, league_name):
+        self.league_config = LEAGUE_CONFIGS.get(league_name.lower())
+        if not self.league_config:
+            raise ValueError(f"Unknown league: {league_name}")
         
-        # Get league settings
-        league_settings = get_league_settings(league_name)
-        league_avg_goals = league_settings['avg_goals']
-        league_over_threshold = league_settings['over_threshold']
-        league_under_threshold = league_settings['under_threshold']
-        league_home_advantage = league_settings['home_advantage']
+        self.params = MODEL_PARAMS
+    
+    def predict(self, home_team: TeamProfile, away_team: TeamProfile):
+        """Generate predictions for a match"""
         
-        # Load team profiles
-        self.load_team_profile(home_team, home_data)
-        self.load_team_profile(away_team, away_data)
+        # 1. Calculate team qualities
+        home_quality = self._calculate_team_quality(home_team, is_home=True)
+        away_quality = self._calculate_team_quality(away_team, is_home=False)
         
-        home_profile = self.team_profiles[home_team]
-        away_profile = self.team_profiles[away_team]
+        # 2. Calculate expected goals
+        home_xg, away_xg = self._calculate_expected_goals(home_team, away_team, home_quality, away_quality)
+        total_xg = home_xg + away_xg
         
-        # 1. QUALITY CALCULATION with league context
-        home_attack_strength = min(2.5, home_profile['xg_per_game'] * (league_avg_goals / 2.7))
-        away_attack_strength = min(2.5, away_profile['xg_per_game'] * (league_avg_goals / 2.7))
+        # 3. Match winner prediction
+        winner_pred = self._predict_winner(home_quality, away_quality, home_team, away_team)
         
-        home_defense_strength = max(0.5, home_profile['defensive_rating'])
-        away_defense_strength = max(0.5, away_profile['defensive_rating'])
+        # 4. Total goals prediction
+        total_pred = self._predict_total_goals(total_xg, home_xg, away_xg, home_quality, away_quality)
         
-        home_quality = (home_attack_strength * 0.7) + (home_defense_strength * 0.3)
-        away_quality = (away_attack_strength * 0.7) + (away_defense_strength * 0.3)
-        
-        # 2. EXPECTED GOALS with LEAGUE ADJUSTMENT
-        home_expected_raw = (home_attack_strength + (2.0 - away_defense_strength)) / 2
-        away_expected_raw = (away_attack_strength + (2.0 - home_defense_strength)) / 2
-        
-        # League-specific home advantage
-        home_advantage = league_home_advantage + home_profile['home_away_goal_diff'] * 0.2
-        home_final = home_expected_raw * (1.0 + home_advantage)
-        away_final = away_expected_raw * 0.9  # Away disadvantage
-        
-        # Cap unrealistic values
-        home_final = min(3.5, max(0.2, home_final))
-        away_final = min(3.0, max(0.2, away_final))
-        
-        total_expected = home_final + away_final
-        expected_goal_diff = home_final - away_final
-        
-        # 3. MATCH WINNER with league context
-        quality_diff = home_quality - away_quality
-        
-        # League-specific win thresholds
-        if league_name in ['Serie A', 'La Liga']:  # Low scoring, tactical leagues
-            win_threshold = 0.5
-        else:  # Higher scoring leagues
-            win_threshold = 0.4
-        
-        if quality_diff > win_threshold:
-            winner = "Home Win"
-            win_confidence = min(80, 55 + (quality_diff * 25))
-        elif quality_diff < -win_threshold:
-            winner = "Away Win"
-            win_confidence = min(78, 53 + (abs(quality_diff) * 25))
-        else:
-            winner = "Draw"
-            win_confidence = 45 + (abs(quality_diff) * -10)
-        
-        # 4. TOTAL GOALS with LEAGUE-SPECIFIC THRESHOLDS
-        avg_total_for_matchup = (home_profile['avg_total_goals'] + away_profile['avg_total_goals']) / 2
-        
-        # Compare to league average, not fixed 2.5
-        league_adjusted_total = (total_expected * 0.6) + (league_avg_goals * 0.4)
-        
-        # Determine over probability
-        if league_adjusted_total > league_over_threshold:
-            over_prob = 50 + min(30, (league_adjusted_total - league_over_threshold) * 30)
-        elif league_adjusted_total < league_under_threshold:
-            over_prob = 50 - min(30, (league_under_threshold - league_adjusted_total) * 30)
-        else:
-            over_prob = 50  # Close to league thresholds
-        
-        # Apply game script adjustments
-        if abs(home_final - away_final) > 1.0:
-            league_adjusted_total *= 0.9
-            over_prob *= 0.9
-        elif abs(home_final - away_final) < 0.3:
-            league_adjusted_total *= 1.1
-            over_prob *= 1.05
-        
-        # Final Total Goals decision
-        if over_prob >= 55:
-            goals_selection = "Over 2.5 Goals"
-            goals_confidence = over_prob * 0.9
-        elif over_prob <= 45:
-            goals_selection = "Under 2.5 Goals"
-            goals_confidence = (100 - over_prob) * 0.9
-        else:
-            goals_selection = "Avoid Total Goals"
-            goals_confidence = over_prob
-        
-        # 5. BTTS with league context
-        btts_raw_prob = calculate_btts_poisson_probability(home_final, away_final, league_name)
-        
-        # Get BTTS decision with league
-        btts_selection, btts_confidence, btts_note = calculate_btts_decision(
-            btts_raw_prob, league_adjusted_total,
-            home_profile['offensive_rating'], away_profile['offensive_rating'],
-            league_name,
-            home_profile['defensive_rating'], away_profile['defensive_rating']
-        )
+        # 5. BTTS prediction
+        btts_pred = self._predict_btts(home_xg, away_xg, home_team, away_team)
         
         return {
-            "team_names": {"home": home_team, "away": away_team},
-            "league": league_name,
-            "raw_data": {
-                "home_profile": home_profile,
-                "away_profile": away_profile,
-                "home_overperformance": (home_data["points"] / games_played) - (home_data["xPTS"] / games_played),
-                "away_overperformance": (away_data["points"] / games_played) - (away_data["xPTS"] / games_played)
-            },
             "analysis": {
-                "home_quality": round(home_quality, 1),
-                "away_quality": round(away_quality, 1),
-                "quality_diff": round(quality_diff, 2),
-                "total_advantage": round(quality_diff, 2),
-                "home_boost": 1.0 + min(0.3, home_advantage),
+                "league": self.league_config['name'],
+                "quality_ratings": {
+                    "home": round(home_quality, 2),
+                    "away": round(away_quality, 2)
+                },
                 "expected_goals": {
-                    "home": round(home_final, 2),
-                    "away": round(away_final, 2),
-                    "total": round(league_adjusted_total, 2)
+                    "home": round(home_xg, 2),
+                    "away": round(away_xg, 2),
+                    "total": round(total_xg, 2)
                 },
-                "expected_goal_diff": round(expected_goal_diff, 2),
-                "league_settings": {
-                    "avg_goals": league_avg_goals,
-                    "over_threshold": league_over_threshold,
-                    "under_threshold": league_under_threshold
-                },
-                "probabilities": {
-                    "over_25": round(over_prob, 0),
-                    "btts_raw": round(btts_raw_prob, 0),
-                    "btts_adjust_note": btts_note
-                },
-                "home_momentum": 1.0 + min(0.15, max(-0.15, home_data["points"] / (games_played * 3) - 0.5)),
-                "away_momentum": 1.0 + min(0.15, max(-0.15, away_data["points"] / (games_played * 3) - 0.5)),
-                "home_intangible": 0.02 if home_data["points"] > home_data["xPTS"] else -0.01,
-                "away_intangible": 0.01 if away_data["points"] > away_data["xPTS"] else -0.02,
-                "volatility_note": "High volatility expected" if abs(home_profile['xg_per_game'] - away_profile['xg_per_game']) > 0.8 else ""
+                "team_flags": {
+                    "home_attack_crisis": home_team.has_attack_crisis,
+                    "away_attack_crisis": away_team.has_attack_crisis,
+                    "home_defense_crisis": home_team.has_defense_crisis,
+                    "away_defense_crisis": away_team.has_defense_crisis
+                }
             },
-            "predictions": [
-                {"type": "Match Winner", "selection": winner, "confidence": round(win_confidence, 0)},
-                {"type": "Total Goals", "selection": goals_selection, "confidence": round(goals_confidence, 0)},
-                {"type": "Both Teams To Score", "selection": btts_selection, "confidence": round(btts_confidence, 0)}
-            ]
+            "predictions": [winner_pred, total_pred, btts_pred]
+        }
+    
+    def _calculate_team_quality(self, team: TeamProfile, is_home: bool):
+        """Calculate team quality score with form momentum"""
+        
+        # Attack strength
+        league_factor = self.league_config['avg_goals'] / 2.7
+        attack_raw = min(2.5, team.xg_pg * league_factor)
+        
+        # Apply attack crisis penalty
+        if team.has_attack_crisis:
+            attack_strength = attack_raw * 0.6
+        else:
+            attack_strength = attack_raw
+        
+        # Defense strength
+        if team.has_defense_crisis and team.last5_losses >= 2:
+            defense_strength = 0.4  # Crisis mode
+        else:
+            defense_strength = max(0.4, 2.0 - team.goals_against_pg)
+        
+        # Base quality
+        base_quality = (attack_strength * self.params['attack_weight'] + 
+                       defense_strength * self.params['defense_weight'])
+        
+        # Add form momentum
+        final_quality = base_quality + team.form_momentum
+        
+        return final_quality
+    
+    def _calculate_expected_goals(self, home: TeamProfile, away: TeamProfile, 
+                                 home_quality: float, away_quality: float):
+        """Calculate expected goals with crisis adjustments"""
+        
+        # Raw calculations
+        home_raw = (home_quality + (2.0 - away_quality)) / 2
+        away_raw = (away_quality + (2.0 - home_quality)) / 2
+        
+        # Apply home advantage
+        home_bonus = 0.05 if home.last5_wins >= 3 else 0
+        home_final = home_raw * (1.0 + self.league_config['home_advantage'] + home_bonus)
+        
+        # Away penalty based on form
+        if away.last5_pts < self.params['away_form_penalty_threshold']:
+            away_final = away_raw * 0.85  # Strong penalty for poor away form
+        else:
+            away_final = away_raw * 0.95  # Minimal penalty
+        
+        # Attack crisis adjustments
+        if home.has_attack_crisis:
+            home_final *= 0.6
+        if away.has_attack_crisis:
+            away_final *= 0.6
+        
+        return home_final, away_final
+    
+    def _predict_winner(self, home_quality: float, away_quality: float, 
+                       home: TeamProfile, away: TeamProfile):
+        """Predict match winner with momentum consideration"""
+        
+        quality_diff = home_quality - away_quality
+        win_threshold = self.league_config['win_threshold']
+        
+        # Form momentum override
+        form_diff = home.form_momentum - away.form_momentum
+        
+        # Adjusted difference
+        adjusted_diff = quality_diff + (form_diff * 2)  # Double weight to form
+        
+        # Determine winner
+        if adjusted_diff > win_threshold:
+            selection = "Home Win"
+            confidence = 55 + (abs(adjusted_diff) * 20)
+        elif adjusted_diff < -win_threshold:
+            selection = "Away Win"
+            confidence = 55 + (abs(adjusted_diff) * 20)
+        else:
+            selection = "Draw"
+            confidence = 50 + (20 - abs(adjusted_diff) * 10)
+        
+        # Confidence adjustments
+        if home.has_attack_crisis or away.has_attack_crisis:
+            confidence -= 10
+        if abs(home_quality - away_quality) > 1.5:  # Big match
+            confidence -= 5
+        
+        confidence = max(30, min(85, confidence))
+        
+        return {
+            "type": "Match Winner",
+            "selection": selection,
+            "confidence": round(confidence, 1)
+        }
+    
+    def _predict_total_goals(self, total_xg: float, home_xg: float, away_xg: float,
+                            home_quality: float, away_quality: float):
+        """Predict total goals with script detection"""
+        
+        # League blending
+        quality_diff = abs(home_quality - away_quality)
+        
+        if quality_diff > 0.7:  # Mismatch
+            total = (total_xg * self.params['mismatch_blend_current'] + 
+                    self.league_config['avg_goals'] * self.params['mismatch_blend_league'])
+        else:
+            total = (total_xg * self.params['league_blend_current'] + 
+                    self.league_config['avg_goals'] * self.params['league_blend_league'])
+        
+        # Script detection
+        if 0.7 < quality_diff < 1.2:
+            total *= 0.9  # 2-0 or 2-1 script likely
+        
+        # Big match penalty
+        if home_quality > self.params['big_match_quality_threshold'] and \
+           away_quality > self.params['big_match_quality_threshold']:
+            total *= 0.85
+        
+        # Compare to thresholds
+        over_thresh = self.league_config['over_threshold']
+        under_thresh = self.league_config['under_threshold']
+        
+        if total > over_thresh + 0.3:
+            selection = "Over 2.5 Goals"
+            confidence = 50 + ((total - over_thresh) * 25)
+        elif total < under_thresh - 0.3:
+            selection = "Under 2.5 Goals"
+            confidence = 50 + ((under_thresh - total) * 25)
+        else:
+            selection = "Avoid Total Goals"
+            confidence = 50
+        
+        confidence = max(30, min(85, confidence))
+        
+        return {
+            "type": "Total Goals",
+            "selection": selection,
+            "confidence": round(confidence, 1)
+        }
+    
+    def _predict_btts(self, home_xg: float, away_xg: float, 
+                     home: TeamProfile, away: TeamProfile):
+        """Predict Both Teams To Score with clean sheet awareness"""
+        
+        # Base Poisson probability
+        home_score_prob = 1 - math.exp(-home_xg)
+        away_score_prob = 1 - math.exp(-away_xg)
+        btts_raw = home_score_prob * away_score_prob * 100
+        
+        # Clean sheet risk adjustment
+        home_cs_prob = home.get_clean_sheet_probability(away_xg)
+        away_cs_prob = away.get_clean_sheet_probability(home_xg)
+        
+        if home_cs_prob > self.params['clean_sheet_risk_threshold']:
+            btts_raw *= (1 - (home_cs_prob - 25) / 100)
+        if away_cs_prob > self.params['clean_sheet_risk_threshold']:
+            btts_raw *= (1 - (away_cs_prob - 25) / 100)
+        
+        # Attack crisis penalty
+        if home.has_attack_crisis:
+            btts_raw *= 0.7
+        if away.has_attack_crisis:
+            btts_raw *= 0.7
+        
+        # Compare to league baseline
+        baseline = self.league_config['btts_baseline']
+        
+        if btts_raw > baseline + 8:
+            selection = "Yes"
+            confidence = min(85, btts_raw)
+        elif btts_raw < baseline - 10:
+            selection = "No"
+            confidence = min(85, 100 - btts_raw)
+        else:
+            selection = "Avoid BTTS"
+            confidence = 50
+        
+        return {
+            "type": "BTTS",
+            "selection": selection,
+            "confidence": round(confidence, 1)
         }
