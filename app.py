@@ -11,7 +11,6 @@ from utils import (
     get_available_leagues
 )
 from betting_advisor import BettingAdvisor
-from data_loader import EnhancedDataLoader  # NEW
 
 def main():
     st.set_page_config(page_title="Advanced xG Predictor", page_icon="📊", layout="wide")
@@ -87,20 +86,27 @@ def main():
             home_teams_data['Team'] == home_team
         ].iloc[0]
         
-        st.write(f"**Matches:** {int(home_team_data['Matches'])}")
-        st.write(f"**Record:** {int(home_team_data['Wins'])}-{int(home_team_data['Draws'])}-{int(home_team_data['Losses'])}")
-        st.write(f"**Goals:** {int(home_team_data['Goals'])}F, {int(home_team_data['Goals_Against'])}A")
-        st.write(f"**xG:** {float(home_team_data['xG']):.2f}, **xGA:** {float(home_team_data['xGA']):.2f}")
-        st.write(f"**Points:** {int(home_team_data['Points'])}, **xPTS:** {float(home_team_data['xPTS']):.2f}")
-        
+        # Convert to dictionary for model
         home_data = {
             "points": int(home_team_data['Points']),
             "goals_scored": int(home_team_data['Goals']),
             "goals_conceded": int(home_team_data['Goals_Against']),
             "xG": float(home_team_data['xG']),
             "xGA": float(home_team_data['xGA']),
-            "xPTS": float(home_team_data['xPTS'])
+            "xPTS": float(home_team_data['xPTS']),
+            "Matches": int(home_team_data['Matches']),
+            "Wins": int(home_team_data['Wins']),
+            "Losses": int(home_team_data['Losses']),
+            "Goals": int(home_team_data['Goals']),
+            "Goals_Against": int(home_team_data['Goals_Against'])
         }
+        
+        # Display stats
+        st.write(f"**Matches:** {int(home_team_data['Matches'])}")
+        st.write(f"**Record:** {int(home_team_data['Wins'])}-{int(home_team_data['Draws'])}-{int(home_team_data['Losses'])}")
+        st.write(f"**Goals:** {int(home_team_data['Goals'])}F, {int(home_team_data['Goals_Against'])}A")
+        st.write(f"**xG:** {float(home_team_data['xG']):.2f}, **xGA:** {float(home_team_data['xGA']):.2f}")
+        st.write(f"**Points:** {int(home_team_data['Points'])}, **xPTS:** {float(home_team_data['xPTS']):.2f}")
     
     with col2:
         st.markdown("### ✈️ Away Team")
@@ -120,20 +126,27 @@ def main():
             away_teams_data['Team'] == away_team
         ].iloc[0]
         
-        st.write(f"**Matches:** {int(away_team_data['Matches'])}")
-        st.write(f"**Record:** {int(away_team_data['Wins'])}-{int(away_team_data['Draws'])}-{int(away_team_data['Losses'])}")
-        st.write(f"**Goals:** {int(away_team_data['Goals'])}F, {int(away_team_data['Goals_Against'])}A")
-        st.write(f"**xG:** {float(away_team_data['xG']):.2f}, **xGA:** {float(away_team_data['xGA']):.2f}")
-        st.write(f"**Points:** {int(away_team_data['Points'])}, **xPTS:** {float(away_team_data['xPTS']):.2f}")
-        
+        # Convert to dictionary for model
         away_data = {
             "points": int(away_team_data['Points']),
             "goals_scored": int(away_team_data['Goals']),
             "goals_conceded": int(away_team_data['Goals_Against']),
             "xG": float(away_team_data['xG']),
             "xGA": float(away_team_data['xGA']),
-            "xPTS": float(away_team_data['xPTS'])
+            "xPTS": float(away_team_data['xPTS']),
+            "Matches": int(away_team_data['Matches']),
+            "Wins": int(away_team_data['Wins']),
+            "Losses": int(away_team_data['Losses']),
+            "Goals": int(away_team_data['Goals']),
+            "Goals_Against": int(away_team_data['Goals_Against'])
         }
+        
+        # Display stats
+        st.write(f"**Matches:** {int(away_team_data['Matches'])}")
+        st.write(f"**Record:** {int(away_team_data['Wins'])}-{int(away_team_data['Draws'])}-{int(away_team_data['Losses'])}")
+        st.write(f"**Goals:** {int(away_team_data['Goals'])}F, {int(away_team_data['Goals_Against'])}A")
+        st.write(f"**xG:** {float(away_team_data['xG']):.2f}, **xGA:** {float(away_team_data['xGA']):.2f}")
+        st.write(f"**Points:** {int(away_team_data['Points'])}, **xPTS:** {float(away_team_data['xPTS']):.2f}")
     
     games_played = min(int(home_team_data['Matches']), int(away_team_data['Matches']))
     
@@ -192,19 +205,13 @@ def run_betting_advisor(predictor, betting_advisor, home_data, away_data, home_t
         advisor_display = betting_advisor.display_recommendations(recommendations)
         st.markdown(advisor_display)
         
-        # Show advisor performance summary (FIXED VERSION)
+        # Show advisor performance summary
         with st.expander("📈 Advisor Performance Summary"):
             summary = betting_advisor.get_performance_summary()
             if summary:  # Check if summary exists
                 st.write(f"**Matches Analyzed:** {summary.get('total_matches_analyzed', 0)}")
                 st.write(f"**Total Recommendations:** {summary.get('total_recommendations', 0)}")
-                
-                # Handle both old and new field names for strong bets
-                strong_bets = summary.get('strong_recommendations', 
-                                         summary.get('total_strong_bets', 
-                                                   summary.get('matches_with_strong_recommendations', 0)))
-                st.write(f"**Strong Bets:** {strong_bets}")
-                
+                st.write(f"**Strong Bets:** {summary.get('total_strong_bets', 0)}")
                 st.write(f"**Avg Recommendations per Match:** {summary.get('avg_recommendations_per_match', 0):.1f}")
                 
                 if 'avg_strong_bets_per_match' in summary:
