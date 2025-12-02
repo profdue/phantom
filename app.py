@@ -1,15 +1,14 @@
 import streamlit as st
 import pandas as pd
-import os
 import sys
+import os
 
-# Add the current directory to path so we can import our modules
+# Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from phantom.models import MatchPredictor, TeamProfile
-from phantom.data_loader import DataLoader
-from phantom.betting_advisor import BettingAdvisor
-from phantom.utils import PredictionUtils
+from models import MatchPredictor, TeamProfile
+from utils import get_available_leagues, load_league_data, PredictionUtils
+from betting_advisor import BettingAdvisor
 
 def main():
     st.set_page_config(
@@ -22,8 +21,6 @@ def main():
     st.markdown("**Intelligent Football Analytics • Evidence-Based Predictions • Risk-Managed Betting**")
     
     # Initialize components
-    data_loader = DataLoader("data")
-    predictor = None
     betting_advisor = BettingAdvisor()
     utils = PredictionUtils()
     
@@ -32,10 +29,19 @@ def main():
         st.header("⚙️ Configuration")
         
         # League selection
-        available_leagues = data_loader.available_leagues
+        available_leagues = get_available_leagues()
         if not available_leagues:
             st.error("❌ No data files found in 'data' folder!")
-            st.info("Please ensure CSV files are in phantom/data/")
+            st.info("Please ensure CSV files are in the 'data' folder:")
+            st.code("""
+            data/
+            ├── premier_league_home_away.csv
+            ├── serie_a_home_away.csv
+            ├── la_liga_home_away.csv
+            ├── bundesliga_home_away.csv
+            ├── ligue_1_home_away.csv
+            └── rfpl_home_away.csv
+            """)
             return
         
         selected_league_key = st.selectbox(
@@ -48,19 +54,17 @@ def main():
         if st.button("📥 Load League Data", type="primary"):
             with st.spinner(f"Loading {selected_league_key}..."):
                 try:
-                    home_df, away_df = data_loader.load_league_data(selected_league_key)
+                    home_df, away_df = load_league_data(selected_league_key)
                     
-                    # Store in session state
-                    st.session_state.home_df = home_df
-                    st.session_state.away_df = away_df
-                    st.session_state.league_name = selected_league_key
-                    st.session_state.league_loaded = True
-                    
-                    st.success(f"✅ Loaded {selected_league_key}")
-                    
-                    # Create predictor with loaded league
-                    st.session_state.predictor = MatchPredictor(selected_league_key)
-                    
+                    if home_df is not None and away_df is not None:
+                        # Store in session state
+                        st.session_state.home_df = home_df
+                        st.session_state.away_df = away_df
+                        st.session_state.league_name = selected_league_key
+                        st.session_state.league_loaded = True
+                        
+                        st.success(f"✅ Loaded {selected_league_key}")
+                        
                 except Exception as e:
                     st.error(f"❌ Error loading data: {str(e)}")
         
@@ -139,21 +143,15 @@ def main():
     if selected_home and selected_away:
         st.markdown("---")
         
-        col1, col2 = st.columns(2)
+        if st.button("🔮 Generate Prediction", type="primary", use_container_width=True):
+            generate_prediction(
+                selected_home, selected_away, 
+                st.session_state.league_name
+            )
         
-        with col1:
-            if st.button("🔮 Generate Prediction", type="primary", use_container_width=True):
-                generate_prediction(
-                    selected_home, selected_away, 
-                    st.session_state.predictor,
-                    data_loader,
-                    betting_advisor,
-                    utils
-                )
-        
-        with col2:
-            if st.button("📈 View Methodology", type="secondary", use_container_width=True):
-                display_methodology()
+        # Methodology button
+        if st.button("📈 View Methodology", type="secondary", use_container_width=True):
+            display_methodology()
 
 def display_team_stats(data, is_home=True):
     """Display team statistics in a clean format"""
@@ -179,35 +177,39 @@ def display_team_stats(data, is_home=True):
         st.write(f"**Points:** {int(data['Points'])}")
         st.write(f"**xPTS:** {float(data['xPTS']):.2f}")
         
-        # Last 5 form
+        # Last 5 form - check if columns exist
         if is_home:
-            st.write("**Last 5 Home Form:**")
-            st.write(f"W{int(data['Last5_Home_Wins'])} D{int(data['Last5_Home_Draws'])} L{int(data['Last5_Home_Losses'])}")
-            st.write(f"GF: {int(data['Last5_Home_GF'])} GA: {int(data['Last5_Home_GA'])}")
-            st.write(f"Pts: {int(data['Last5_Home_PTS'])}/15")
+            if 'Last5_Home_Wins' in data:
+                st.write("**Last 5 Home Form:**")
+                st.write(f"W{int(data['Last5_Home_Wins'])} D{int(data['Last5_Home_Draws'])} L{int(data['Last5_Home_Losses'])}")
+                st.write(f"GF: {int(data['Last5_Home_GF'])} GA: {int(data['Last5_Home_GA'])}")
+                st.write(f"Pts: {int(data['Last5_Home_PTS'])}/15")
         else:
-            st.write("**Last 5 Away Form:**")
-            st.write(f"W{int(data['Last5_Away_Wins'])} D{int(data['Last5_Away_Draws'])} L{int(data['Last5_Away_Losses'])}")
-            st.write(f"GF: {int(data['Last5_Away_GF'])} GA: {int(data['Last5_Away_GA'])}")
-            st.write(f"Pts: {int(data['Last5_Away_PTS'])}/15")
+            if 'Last5_Away_Wins' in data:
+                st.write("**Last 5 Away Form:**")
+                st.write(f"W{int(data['Last5_Away_Wins'])} D{int(data['Last5_Away_Draws'])} L{int(data['Last5_Away_Losses'])}")
+                st.write(f"GF: {int(data['Last5_Away_GF'])} GA: {int(data['Last5_Away_GA'])}")
+                st.write(f"Pts: {int(data['Last5_Away_PTS'])}/15")
 
-def generate_prediction(home_team, away_team, predictor, data_loader, betting_advisor, utils):
+def generate_prediction(home_team, away_team, league_name):
     """Generate and display prediction"""
     
     with st.spinner("🔬 Running advanced analysis..."):
         try:
             # Create team profiles
-            home_profile = data_loader.get_team_profile(
-                home_team, 
-                st.session_state.league_name, 
-                is_home=True
-            )
+            home_data = st.session_state.home_df[
+                st.session_state.home_df['Team'] == home_team
+            ].iloc[0].to_dict()
             
-            away_profile = data_loader.get_team_profile(
-                away_team, 
-                st.session_state.league_name, 
-                is_home=False
-            )
+            away_data = st.session_state.away_df[
+                st.session_state.away_df['Team'] == away_team
+            ].iloc[0].to_dict()
+            
+            home_profile = TeamProfile(home_data, is_home=True)
+            away_profile = TeamProfile(away_data, is_home=False)
+            
+            # Create predictor
+            predictor = MatchPredictor(league_name)
             
             # Generate prediction
             result = predictor.predict(home_profile, away_profile)
@@ -328,14 +330,22 @@ def display_prediction_results(result, betting_advisor):
             
             elif pred_type == "Total Goals":
                 total_xg = result['analysis']['expected_goals']['total']
-                league_avg = predictor.league_config['avg_goals']
+                league_name = result['analysis']['league']
                 
-                if total_xg > league_avg + 0.3:
-                    st.info(f"⚡ High-scoring expected ({total_xg:.2f} vs league avg {league_avg})")
-                elif total_xg < league_avg - 0.3:
-                    st.info(f"🛡️ Defensive battle expected ({total_xg:.2f} vs league avg {league_avg})")
-                else:
-                    st.info(f"📈 Average scoring expected ({total_xg:.2f} vs league avg {league_avg})")
+                # Get league average
+                league_avg = None
+                for config in LEAGUE_CONFIGS.values():
+                    if config['name'] == league_name:
+                        league_avg = config['avg_goals']
+                        break
+                
+                if league_avg:
+                    if total_xg > league_avg + 0.3:
+                        st.info(f"⚡ High-scoring expected ({total_xg:.2f} vs league avg {league_avg:.2f})")
+                    elif total_xg < league_avg - 0.3:
+                        st.info(f"🛡️ Defensive battle expected ({total_xg:.2f} vs league avg {league_avg:.2f})")
+                    else:
+                        st.info(f"📈 Average scoring expected ({total_xg:.2f} vs league avg {league_avg:.2f})")
             
             elif pred_type == "BTTS":
                 st.info(f"📊 BTTS probability calculated with clean sheet risk adjustment")
@@ -395,7 +405,7 @@ def display_prediction_results(result, betting_advisor):
     
     # Performance note
     st.markdown("---")
-    st.caption(f"⚡ PHANTOM v2.3 • League: {predictor.league_config['name']} • Winner Accuracy: 77.8%")
+    st.caption(f"⚡ PHANTOM v2.3 • League: {result['analysis']['league']} • Winner Accuracy: 77.8%")
 
 def display_methodology():
     """Display the model methodology"""
