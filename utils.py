@@ -2,21 +2,30 @@ import numpy as np
 import pandas as pd
 import os
 from typing import Dict, Tuple, List, Optional
+import math
 
-# Add new league adjustment function
-def get_league_adjustments(league_name: str) -> Dict:
-    """Get league-specific goal averages and adjustments"""
-    league_data = {
-        'Bundesliga': {'avg_goals': 3.14, 'over_threshold': 3.0, 'under_threshold': 2.8, 'btts_baseline': 58},
-        'Premier League': {'avg_goals': 2.93, 'over_threshold': 2.8, 'under_threshold': 2.6, 'btts_baseline': 56},
-        'Ligue 1': {'avg_goals': 2.96, 'over_threshold': 2.85, 'under_threshold': 2.65, 'btts_baseline': 55},
-        'La Liga': {'avg_goals': 2.62, 'over_threshold': 2.5, 'under_threshold': 2.3, 'btts_baseline': 52},
-        'Serie A': {'avg_goals': 2.56, 'over_threshold': 2.45, 'under_threshold': 2.25, 'btts_baseline': 51},
-        'RFPL': {'avg_goals': 2.59, 'over_threshold': 2.5, 'under_threshold': 2.3, 'btts_baseline': 50}
-    }
-    return league_data.get(league_name, {'avg_goals': 2.7, 'over_threshold': 2.7, 'under_threshold': 2.5, 'btts_baseline': 52})
+# Add the missing function
+def calculate_btts_poisson_probability(home_xg: float, away_xg: float) -> float:
+    """Calculate BTTS probability using Poisson distribution"""
+    # Probability both teams score at least once
+    p_home_scores = 1 - math.exp(-home_xg)
+    p_away_scores = 1 - math.exp(-away_xg)
+    
+    # Assuming independence (simplified model)
+    btts_prob = p_home_scores * p_away_scores * 100  # Convert to percentage
+    
+    # Apply correlation adjustment (teams not completely independent)
+    # When total xG is high, correlation increases
+    total_xg = home_xg + away_xg
+    if total_xg > 3.5:
+        btts_prob *= 1.15
+    elif total_xg > 2.8:
+        btts_prob *= 1.08
+    elif total_xg < 2.0:
+        btts_prob *= 0.9
+    
+    return min(85, max(15, btts_prob))
 
-# Update BTTS decision to include team profiles
 def calculate_btts_decision(btts_raw_prob: float, total_xg: float, 
                            home_offensive: float, away_offensive: float,
                            home_defensive: Optional[float] = None, 
@@ -74,7 +83,52 @@ def calculate_btts_decision(btts_raw_prob: float, total_xg: float,
     else:
         return "Avoid BTTS", 48, f"{adjusted_prob:.0f}% probability falls in ambiguous range"
 
-# Add team-specific adjustment calculator
+def get_match_context(home_xg: float, away_xg: float, total_xg: float) -> Dict:
+    """Determine match context based on xG values"""
+    context = {
+        "expected_pace": "Slow",
+        "expected_style": "Defensive",
+        "btts_tendency": "Low",
+        "scoring_efficiency": "Low"
+    }
+    
+    # Determine pace
+    if total_xg > 3.0:
+        context["expected_pace"] = "Fast"
+    elif total_xg > 2.5:
+        context["expected_pace"] = "Moderate"
+    
+    # Determine style
+    if abs(home_xg - away_xg) > 0.8:
+        context["expected_style"] = "One-sided"
+    elif abs(home_xg - away_xg) < 0.3:
+        context["expected_style"] = "Balanced"
+    
+    # Determine BTTS tendency
+    btts_raw = calculate_btts_poisson_probability(home_xg, away_xg)
+    if btts_raw > 60:
+        context["btts_tendency"] = "High"
+    elif btts_raw > 50:
+        context["btts_tendency"] = "Medium"
+    
+    # Determine scoring efficiency
+    if home_xg > 1.5 or away_xg > 1.5:
+        context["scoring_efficiency"] = "High"
+    
+    return context
+
+def get_league_adjustments(league_name: str) -> Dict:
+    """Get league-specific goal averages and adjustments"""
+    league_data = {
+        'Bundesliga': {'avg_goals': 3.14, 'over_threshold': 3.0, 'under_threshold': 2.8, 'btts_baseline': 58},
+        'Premier League': {'avg_goals': 2.93, 'over_threshold': 2.8, 'under_threshold': 2.6, 'btts_baseline': 56},
+        'Ligue 1': {'avg_goals': 2.96, 'over_threshold': 2.85, 'under_threshold': 2.65, 'btts_baseline': 55},
+        'La Liga': {'avg_goals': 2.62, 'over_threshold': 2.5, 'under_threshold': 2.3, 'btts_baseline': 52},
+        'Serie A': {'avg_goals': 2.56, 'over_threshold': 2.45, 'under_threshold': 2.25, 'btts_baseline': 51},
+        'RFPL': {'avg_goals': 2.59, 'over_threshold': 2.5, 'under_threshold': 2.3, 'btts_baseline': 50}
+    }
+    return league_data.get(league_name, {'avg_goals': 2.7, 'over_threshold': 2.7, 'under_threshold': 2.5, 'btts_baseline': 52})
+
 def calculate_team_specific_adjustments(home_profile: Dict, away_profile: Dict) -> Dict:
     """Calculate adjustments based on team-specific profiles"""
     
@@ -98,7 +152,26 @@ def calculate_team_specific_adjustments(home_profile: Dict, away_profile: Dict) 
         'btts_bias': 'positive' if defensive_factor > 1.1 else 'negative' if defensive_factor < 0.9 else 'neutral'
     }
 
-# Keep existing functions but update formatting to include team profiles
+def validate_input_data(home_data: Dict, away_data: Dict, games_played: int) -> Tuple[bool, str]:
+    """Validate input data before processing"""
+    if games_played <= 0:
+        return False, "Games played must be greater than 0"
+    
+    required_fields = ["points", "goals_scored", "goals_conceded", "xG", "xGA", "xPTS"]
+    
+    for field in required_fields:
+        if field not in home_data:
+            return False, f"Missing {field} in home data"
+        if field not in away_data:
+            return False, f"Missing {field} in away data"
+        
+        # Check for reasonable values
+        if field in ["xG", "xGA", "xPTS"]:
+            if home_data[field] < 0 or away_data[field] < 0:
+                return False, f"{field} cannot be negative"
+    
+    return True, ""
+
 def format_prediction_display(pred: Dict, analysis_data: Dict, team_names: Dict, team_profiles: Dict) -> Tuple[str, str, str, str]:
     """Generate formatted display with team profile insights"""
     
@@ -106,7 +179,7 @@ def format_prediction_display(pred: Dict, analysis_data: Dict, team_names: Dict,
     pred_type = pred['type']
     selection = pred['selection']
     
-    # Color and stake determination (keep existing)
+    # Color and stake determination
     if "Avoid" in selection:
         color = "⚪"
         stake = "❌ AVOID"
@@ -127,10 +200,11 @@ def format_prediction_display(pred: Dict, analysis_data: Dict, team_names: Dict,
         stake = "0.25 units"
     
     # Generate analysis with team profile insights
+    description = ""
     if pred_type == "Total Goals":
-        total_expected = analysis_data['total_expected']
-        home_avg = team_profiles['home'].get('avg_total_goals', 2.7)
-        away_avg = team_profiles['away'].get('avg_total_goals', 2.7)
+        total_expected = analysis_data.get('total_expected', analysis_data.get('expected_goals', {}).get('total', 2.5))
+        home_avg = team_profiles.get('home', {}).get('avg_total_goals', 2.7)
+        away_avg = team_profiles.get('away', {}).get('avg_total_goals', 2.7)
         
         if "Over" in selection:
             if total_expected > max(home_avg, away_avg) + 0.5:
@@ -144,8 +218,8 @@ def format_prediction_display(pred: Dict, analysis_data: Dict, team_names: Dict,
                 description = f"**Analysis:** Below-average expected goals ({total_expected:.1f}) suggests limited scoring."
     
     elif pred_type == "Both Teams To Score":
-        home_defense = team_profiles['home'].get('goals_conceded_pg', 1.3)
-        away_defense = team_profiles['away'].get('goals_conceded_pg', 1.3)
+        home_defense = team_profiles.get('home', {}).get('goals_conceded_pg', 1.3)
+        away_defense = team_profiles.get('away', {}).get('goals_conceded_pg', 1.3)
         
         if selection == "Yes":
             if home_defense > 1.5 and away_defense > 1.5:
@@ -157,6 +231,8 @@ def format_prediction_display(pred: Dict, analysis_data: Dict, team_names: Dict,
                 description = f"**Analysis:** Strong defensive organization ({home_defense:.1f}/{away_defense:.1f} goals conceded) favors clean sheet."
             else:
                 description = f"**Analysis:** Matchup dynamics suggest lower BTTS probability."
+    else:
+        description = f"**Analysis:** Based on advanced statistical modeling and matchup analysis."
     
     # Generate reasoning
     reasoning = generate_enhanced_reasoning(pred, analysis_data, team_names, team_profiles)
@@ -170,9 +246,9 @@ def generate_enhanced_reasoning(pred: Dict, analysis_data: Dict, team_names: Dic
     selection = pred['selection']
     
     if pred_type == "Total Goals":
-        total_expected = analysis_data['total_expected']
-        home_profile = team_profiles['home']
-        away_profile = team_profiles['away']
+        total_expected = analysis_data.get('total_expected', analysis_data.get('expected_goals', {}).get('total', 2.5))
+        home_profile = team_profiles.get('home', {})
+        away_profile = team_profiles.get('away', {})
         
         if "Over" in selection:
             return f"**Reasoning:** Combined expected goals of {total_expected:.1f}. {team_names['home']} averages {home_profile.get('avg_total_goals', 2.7):.1f} total goals, {team_names['away']} averages {away_profile.get('avg_total_goals', 2.7):.1f}. Matchup analysis suggests higher-scoring game."
@@ -180,8 +256,8 @@ def generate_enhanced_reasoning(pred: Dict, analysis_data: Dict, team_names: Dic
             return f"**Reasoning:** Combined expected goals of {total_expected:.1f}. Defensive analysis shows {team_names['home']} concedes {home_profile.get('goals_conceded_pg', 1.3):.1f} goals/game, {team_names['away']} concedes {away_profile.get('goals_conceded_pg', 1.3):.1f}. Likely tactical, low-scoring affair."
     
     elif pred_type == "Both Teams To Score":
-        home_defense = team_profiles['home'].get('goals_conceded_pg', 1.3)
-        away_defense = team_profiles['away'].get('goals_conceded_pg', 1.3)
+        home_defense = team_profiles.get('home', {}).get('goals_conceded_pg', 1.3)
+        away_defense = team_profiles.get('away', {}).get('goals_conceded_pg', 1.3)
         
         if selection == "Yes":
             return f"**Reasoning:** Both teams show defensive vulnerabilities ({home_defense:.1f} and {away_defense:.1f} goals conceded per game). Expected open match with scoring opportunities for both sides."
@@ -190,3 +266,43 @@ def generate_enhanced_reasoning(pred: Dict, analysis_data: Dict, team_names: Dic
     
     # Default reasoning for other prediction types
     return f"**Reasoning:** Based on statistical models and team performance analysis."
+
+def load_league_data(league_name: str) -> Optional[pd.DataFrame]:
+    """Load CSV data for a specific league"""
+    try:
+        # Remove .csv extension if present in selection
+        if league_name.endswith('.csv'):
+            league_name = league_name[:-4]
+        
+        data_path = os.path.join("data", f"{league_name}.csv")
+        
+        if not os.path.exists(data_path):
+            st.error(f"File not found: {data_path}")
+            return None
+        
+        df = pd.read_csv(data_path)
+        
+        # Basic validation
+        required_columns = ['Team', 'Home_Away', 'Matches', 'Wins', 'Draws', 'Losses', 
+                           'Goals', 'Goals_Against', 'xG', 'xGA', 'xPTS', 'Points']
+        
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            st.error(f"Missing required columns: {missing_columns}")
+            return None
+        
+        return df
+    
+    except Exception as e:
+        st.error(f"Error loading {league_name}: {str(e)}")
+        return None
+
+def get_available_leagues() -> List[str]:
+    """Get list of available CSV files in data folder"""
+    data_dir = "data"
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+        return []
+    
+    csv_files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
+    return sorted(csv_files)
