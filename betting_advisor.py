@@ -122,12 +122,12 @@ class BettingAdvisor:
                 'filter_applied': 'Moderate Favorite Fade'
             })
         
-        # 4. BTTS VALUE DETECTION
+        # 4. BTTS VALUE DETECTION - FIXED: Use btts_pred['selection'] not btts_selection
         if btts_pred['confidence'] >= 58 and btts_pred['selection'] != 'Avoid BTTS':  # Lowered threshold
             if total_xg > 2.8 and abs(xg_diff) < 1.2:
                 recommendations.append({
                     'market': 'Both Teams to Score',
-                    'selection': btts_selection.upper(),
+                    'selection': btts_pred['selection'].upper(),
                     'confidence': btts_pred['confidence'],
                     'stake': '0.75 units',
                     'reason': f"High-scoring ({total_xg:.1f} xG) game favors BTTS.",
@@ -138,7 +138,7 @@ class BettingAdvisor:
                 # Defensive mismatch = likely BTTS
                 recommendations.append({
                     'market': 'Both Teams to Score',
-                    'selection': btts_selection.upper(),
+                    'selection': btts_pred['selection'].upper(),
                     'confidence': btts_pred['confidence'],
                     'stake': '0.5 units',
                     'reason': f"Defensive mismatch favors BTTS: {mismatch_reason}",
