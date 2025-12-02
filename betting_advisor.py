@@ -1,7 +1,3 @@
-"""
-OPTIMIZED BETTING ADVISOR v3.0
-Based on 14-match backtesting analysis
-"""
 from typing import Dict, List, Tuple
 import json
 from datetime import datetime
@@ -20,7 +16,6 @@ class BettingAdvisor:
         match_winner_pred = next(p for p in model_predictions['predictions'] if p['type'] == 'Match Winner')
         total_goals_pred = next(p for p in model_predictions['predictions'] if p['type'] == 'Total Goals')
         btts_pred = next(p for p in model_predictions['predictions'] if p['type'] == 'Both Teams To Score')
-        ah_pred = next(p for p in model_predictions['predictions'] if p['type'] == 'Asian Handicap')
         
         analysis = model_predictions['analysis']
         total_xg = analysis['expected_goals']['total']
@@ -104,35 +99,6 @@ class BettingAdvisor:
                     'edge_type': 'MODERATE',
                     'filter_applied': 'High xG Close Game BTTS'
                 })
-        
-        # 5. ASIAN HANDICAP AVOIDANCE (35.7% ACCURACY - WORSE THAN RANDOM)
-        if ah_pred['confidence'] >= 60:
-            recommendations.append({
-                'market': '⛔ AVOID ASIAN HANDICAP',
-                'selection': 'DO NOT BET',
-                'confidence': 0,
-                'stake': '0 units',
-                'reason': f"MODEL ONLY 35.7% ACCURATE ON HANDICAPS. HIGH LOSS RISK.",
-                'edge_type': 'AVOID',
-                'filter_applied': 'Asian Handicap Avoidance'
-            })
-        
-        # 6. PARLAY: TOTAL GOALS + FADE (HIGH VALUE)
-        strong_total_goals = [r for r in recommendations if 'Total Goals' in r['market'] and r['edge_type'] in ['VERY STRONG', 'STRONG']]
-        contrarian_bets = [r for r in recommendations if r['edge_type'] == 'CONTRARIAN']
-        
-        if strong_total_goals and contrarian_bets:
-            parlay_confidence = min(70, strong_total_goals[0]['confidence'] * 65 / 100)  # Conservative estimate
-            
-            recommendations.append({
-                'market': 'PARLAY: Total Goals + Contrarian',
-                'selection': f"{strong_total_goals[0]['selection']} & {contrarian_bets[0]['selection']}",
-                'confidence': parlay_confidence,
-                'stake': '0.25 units',
-                'reason': f"High-value combination. Est. probability: {parlay_confidence:.0f}%",
-                'edge_type': 'PARLAY',
-                'filter_applied': 'Value Parlay Builder'
-            })
         
         # Record this analysis
         self.record_recommendations(
