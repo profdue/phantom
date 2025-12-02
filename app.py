@@ -4,11 +4,14 @@ import os
 from models import AdvancedUnderstatPredictor
 from utils import (
     validate_input_data,
+    get_league_adjustments,
+    calculate_team_specific_adjustments
     format_prediction_display,
     load_league_data,
     get_available_leagues
 )
 from betting_advisor import BettingAdvisor
+from data_loader import EnhancedDataLoader  # NEW
 
 def main():
     st.set_page_config(page_title="Advanced xG Predictor", page_icon="📊", layout="wide")
