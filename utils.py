@@ -7,13 +7,11 @@ def get_available_leagues(data_folder="data"):
     """Get list of available leagues from CSV files"""
     import os
     
-    # Check if data folder exists
     if not os.path.exists(data_folder):
         print(f"⚠️ Data folder '{data_folder}' not found. Creating it.")
         os.makedirs(data_folder, exist_ok=True)
         return []
     
-    # Get all CSV files
     csv_files = []
     try:
         for file in os.listdir(data_folder):
@@ -27,41 +25,27 @@ def get_available_leagues(data_folder="data"):
         print("No CSV files found in data folder")
         return []
     
-    # Process CSV filenames into league names
     leagues = []
     for file in csv_files:
-        # Remove .csv extension
         name = file.replace('.csv', '')
-        
-        # Remove common suffixes
         name = name.replace('_home_away', '')
         name = name.replace('_homeaway', '')
         name = name.replace('_home', '')
         name = name.replace('_away', '')
-        
-        # Replace underscores with spaces
         name = name.replace('_', ' ')
-        
-        # Title case with special handling
         name = name.title()
-        
-        # Fix specific league names
-        name = name.replace('La Liga', 'La Liga')  # Keep as is
+        name = name.replace('La Liga', 'La Liga')
         name = name.replace('Rfpl', 'RFPL')
         name = name.replace('Premier League', 'Premier League')
-        
         leagues.append(name.strip())
     
-    # Remove duplicates and sort
     return sorted(list(set(leagues)))
 
 def load_league_data(league_name, data_folder="data"):
     """Load CSV data for selected league"""
     try:
-        # Convert league name to possible filename patterns
         base_name = league_name.lower().replace(' ', '_')
         
-        # Try different filename patterns
         possible_filenames = [
             f"{base_name}_home_away.csv",
             f"{base_name}.csv",
@@ -76,7 +60,6 @@ def load_league_data(league_name, data_folder="data"):
                 break
         
         if filepath is None:
-            # Try to find any CSV file that contains the league name
             for file in os.listdir(data_folder):
                 if file.endswith('.csv') and league_name.lower().replace(' ', '_') in file.lower():
                     filepath = os.path.join(data_folder, file)
@@ -86,13 +69,9 @@ def load_league_data(league_name, data_folder="data"):
             print(f"No CSV file found for league: {league_name}")
             return None
         
-        # Load CSV
         df = pd.read_csv(filepath)
-        
-        # Clean column names (remove trailing/leading spaces)
         df.columns = df.columns.str.strip()
         
-        # Ensure required columns exist
         required_columns = ['Team', 'Matches', 'Home_Away', 'Wins', 'Draws', 'Losses', 
                            'Goals', 'Goals_Against', 'Points', 'xG', 'xGA', 'xPTS']
         
@@ -101,7 +80,6 @@ def load_league_data(league_name, data_folder="data"):
                 print(f"Missing required column: {col}")
                 return None
         
-        # Convert numeric columns
         numeric_cols = ['Matches', 'Wins', 'Draws', 'Losses', 'Goals', 'Goals_Against', 
                        'Points', 'xG', 'xGA', 'xPTS']
         
@@ -123,7 +101,6 @@ def validate_input_data(home_data: Dict, away_data: Dict, games_played: int) -> 
         if key not in home_data or key not in away_data:
             return False, f"Missing required key: {key}"
     
-    # Check for reasonable values
     if home_data["xG"] < 0 or away_data["xG"] < 0:
         return False, "xG cannot be negative"
     
@@ -142,9 +119,9 @@ def calculate_poisson_probability(lambda_val: float, k: int) -> float:
 def calculate_btts_poisson_probability(home_expected: float, away_expected: float) -> float:
     """Calculate Both Teams To Score probability using Poisson distribution"""
     
-    # Adjust for opponent defense
-    home_scoring_exp = home_expected * 0.85
-    away_scoring_exp = away_expected * 0.85
+    # Conservative scoring expectation adjustment
+    home_scoring_exp = home_expected * 0.88  # Reduced from 0.85
+    away_scoring_exp = away_expected * 0.88
     
     # Probability of NOT scoring
     home_no_goal = np.exp(-home_scoring_exp)
@@ -160,13 +137,12 @@ def get_match_context(home_data: Dict, away_data: Dict, home_xg_pg: float, away_
     context_factor = 1.0
     volatility_note = ""
     
-    # High total xG matches are more unpredictable
     total_xg = home_xg_pg + away_xg_pg
     if total_xg > 3.0:
-        context_factor *= 0.92
+        context_factor *= 0.94  # Less reduction (was 0.92)
         volatility_note = "High expected goals match - higher variance expected"
     elif total_xg > 2.5:
-        context_factor *= 0.96
+        context_factor *= 0.97  # Less reduction (was 0.96)
         volatility_note = "Elevated expected goals - moderate variance"
     
     return context_factor, volatility_note
@@ -201,41 +177,45 @@ def get_btts_reasoning(btts_prob: float, home_xg: float, away_xg: float,
             return f"**Reasoning:** {btts_prob:.0f}% BTTS probability falls in ambiguous range - outcome depends on finishing quality. {adjusted_note}"
 
 def calculate_btts_decision(btts_raw_prob: float, total_xg: float, home_quality: float, away_quality: float) -> Tuple[str, float, str]:
-    """Calculate BTTS decision with adjusted probabilities based on total xG"""
+    """Calculate BTTS decision with CONSERVATIVE adjusted probabilities"""
     
-    # When total xG is high, BTTS is more likely
+    # Conservative adjustments based on total xG
     if total_xg > 3.0:
-        btts_boost = 8
-        btts_selection_threshold = 52
-        btts_avoid_upper = 48
+        btts_boost = 6  # Reduced from 8
+        btts_selection_threshold = 54  # Higher threshold
+        btts_avoid_upper = 46  # Wider avoid range
     elif total_xg > 2.5:
-        btts_boost = 4
-        btts_selection_threshold = 54
-        btts_avoid_upper = 46
+        btts_boost = 3  # Reduced from 4
+        btts_selection_threshold = 56  # Higher threshold
+        btts_avoid_upper = 44
     else:
         btts_boost = 0
-        btts_selection_threshold = 55
-        btts_avoid_upper = 45
+        btts_selection_threshold = 58  # Higher threshold
+        btts_avoid_upper = 42
     
-    # Add mismatch adjustment: Very unbalanced matches reduce BTTS probability
+    # CONSERVATIVE mismatch adjustment: Only apply for extreme mismatches
     quality_ratio = home_quality / (away_quality + 0.001)
     mismatch_note = ""
-    if quality_ratio < 0.6 or quality_ratio > 1.67:  # One team much stronger
-        btts_boost -= 5
-        mismatch_note = "Mismatch adjustment applied"
     
-    adjusted_prob = min(85, max(15, btts_raw_prob + btts_boost))
+    if quality_ratio < 0.5 or quality_ratio > 2.0:  # EXTREME mismatch only
+        btts_boost -= 3  # Reduced from 5
+        mismatch_note = "Mismatch adjustment applied"
+    elif quality_ratio < 0.65 or quality_ratio > 1.54:  # Moderate mismatch
+        btts_boost -= 1  # Very light adjustment
+        mismatch_note = "Light mismatch adjustment"
+    
+    adjusted_prob = min(80, max(20, btts_raw_prob + btts_boost))  # Tighter bounds
     
     if adjusted_prob >= btts_selection_threshold:
-        confidence = adjusted_prob * 0.85
+        confidence = adjusted_prob * 0.88  # Slight discount
         if confidence > 70:
-            confidence = min(85, confidence)
+            confidence = min(78, confidence)  # Lower cap
         note = f"Adjusted from {btts_raw_prob:.0f}% to {adjusted_prob:.0f}%"
         if mismatch_note:
             note += f" ({mismatch_note})"
         return "Yes", confidence, note
     elif adjusted_prob <= btts_avoid_upper:
-        confidence = (100 - adjusted_prob) * 0.85
+        confidence = (100 - adjusted_prob) * 0.88  # Slight discount
         note = f"Adjusted from {btts_raw_prob:.0f}% to {adjusted_prob:.0f}%"
         if mismatch_note:
             note += f" ({mismatch_note})"
@@ -250,24 +230,27 @@ def format_prediction_display(pred: Dict, analysis_data: Dict, team_names: Dict,
     pred_type = pred['type']
     selection = pred['selection']
     
-    # Determine color and stake
+    # UPDATED STAKE SYSTEM: More conservative
     if "Avoid" in selection:
         color = "⚪"
         stake = "❌ AVOID"
     elif confidence >= 70:
         color = "🟢"
-        stake = "2.0 units"
-    elif confidence >= 60:
+        stake = "1.5 units"  # Reduced from 2.0
+    elif confidence >= 62:
         color = "🟢"
-        stake = "1.5 units"
-    elif confidence >= 50:
+        stake = "1.0 units"  # Reduced from 1.5
+    elif confidence >= 55:
         color = "🟡" 
-        stake = "1.0 units"
+        stake = "0.75 units"  # Reduced from 1.0
+    elif confidence >= 48:
+        color = "🟡"
+        stake = "0.5 units"  # Same
     else:
         color = "🟠"
-        stake = "0.5 units"
+        stake = "0.25 units"  # Reduced from 0.5
     
-    # Generate dynamic analysis
+    # Generate dynamic analysis (same as before, but with updated thresholds)
     if pred_type == "Match Winner":
         if "Home" in selection:
             if analysis_data['quality_diff'] > 1.0:
@@ -279,9 +262,9 @@ def format_prediction_display(pred: Dict, analysis_data: Dict, team_names: Dict,
             else:
                 advantage_source = "slight statistical edge"
             
-            if confidence >= 75:
+            if confidence >= 70:
                 description = f"**Analysis:** Strong statistical edge based on {advantage_source}."
-            elif confidence >= 65:
+            elif confidence >= 62:
                 description = f"**Analysis:** Clear advantage with {advantage_source}."
             else:
                 description = f"**Analysis:** Moderate edge with {advantage_source}."
@@ -294,9 +277,9 @@ def format_prediction_display(pred: Dict, analysis_data: Dict, team_names: Dict,
             else:
                 advantage_source = "quality advantage"
             
-            if confidence >= 75:
+            if confidence >= 68:
                 description = f"**Analysis:** Strong away advantage based on {advantage_source}."
-            elif confidence >= 65:
+            elif confidence >= 60:
                 description = f"**Analysis:** Clear away edge with {advantage_source}."
             else:
                 description = f"**Analysis:** Moderate away advantage detected."
@@ -307,15 +290,14 @@ def format_prediction_display(pred: Dict, analysis_data: Dict, team_names: Dict,
             else:
                 description = "**Analysis:** Competitive match where statistical advantages cancel out."
         
-        # Add volatility note if present
-        if analysis_data['volatility_note'] and confidence < 75:
+        if analysis_data['volatility_note'] and confidence < 70:
             description += f" {analysis_data['volatility_note']}"
     
     elif pred_type == "Total Goals":
         total_xg = analysis_data['expected_goals']['total']
         
         if "Over" in selection:
-            if total_xg > 3.5:
+            if total_xg > 3.2:
                 description = f"**Analysis:** Very high expected goals ({total_xg:.1f} xG) indicates extremely open match."
             elif total_xg > 2.8:
                 description = f"**Analysis:** Elevated expected goals ({total_xg:.1f} xG) suggests multiple scoring opportunities."
@@ -341,15 +323,15 @@ def format_prediction_display(pred: Dict, analysis_data: Dict, team_names: Dict,
         exp_diff = analysis_data['expected_goal_diff']
         
         if "Home" in selection:
-            if exp_diff > 1.0:
-                description = f"**Analysis:** Expected goal difference of {exp_diff:.1f} strongly favors home cover."
+            if exp_diff > 0.9:
+                description = f"**Analysis:** Expected goal difference of {exp_diff:.1f} favors home cover."
             elif exp_diff > 0.5:
                 description = f"**Analysis:** Clear home advantage with {exp_diff:.1f} expected goal difference."
             else:
                 description = f"**Analysis:** Moderate home edge suggests ability to cover handicap."
         elif "Away" in selection:
-            if exp_diff < -1.0:
-                description = f"**Analysis:** Expected goal difference of {abs(exp_diff):.1f} strongly favors away cover."
+            if exp_diff < -0.9:
+                description = f"**Analysis:** Expected goal difference of {abs(exp_diff):.1f} favors away cover."
             elif exp_diff < -0.5:
                 description = f"**Analysis:** Clear away advantage with {abs(exp_diff):.1f} expected goal difference."
             else:
@@ -357,7 +339,6 @@ def format_prediction_display(pred: Dict, analysis_data: Dict, team_names: Dict,
         else:  # Draw No Bet
             description = "**Analysis:** Minimal expected goal difference suggests very close match."
     
-    # Generate reasoning
     reasoning = generate_reasoning(pred, analysis_data, team_names, raw_data)
     
     return color, stake, description, reasoning
@@ -370,7 +351,6 @@ def generate_reasoning(pred: Dict, analysis_data: Dict, team_names: Dict, raw_da
     
     if pred_type == "Match Winner":
         if "Home" in selection:
-            # Check for overperformance factor
             if raw_data['home_overperformance'] > 0.2:
                 overperformance_note = f" ({team_names['home']} has been outperforming their expected points by {raw_data['home_overperformance']:.1f} per game)"
             else:
@@ -411,7 +391,6 @@ def generate_reasoning(pred: Dict, analysis_data: Dict, team_names: Dict, raw_da
         home_xg = analysis_data['expected_goals']['home']
         away_xg = analysis_data['expected_goals']['away']
         
-        # Use the enhanced reasoning function
         return get_btts_reasoning(
             btts_raw_prob, home_xg, away_xg, 
             raw_data['home_xga_pg'], raw_data['away_xga_pg'], total_xg,
