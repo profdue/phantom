@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import os
+import streamlit as st
 from typing import Dict, Tuple, List, Optional
 import math
 
@@ -281,6 +282,15 @@ def load_league_data(league_name: str) -> Optional[pd.DataFrame]:
             return None
         
         df = pd.read_csv(data_path)
+        
+        # Handle column name variations from your CSV structure
+        column_mapping = {}
+        # Map Team_Goals_Conceded_PG to goals_conceded_pg for model compatibility
+        if 'Team_Goals_Conceded_PG' in df.columns:
+            column_mapping['Team_Goals_Conceded_PG'] = 'goals_conceded_pg'
+        
+        if column_mapping:
+            df = df.rename(columns=column_mapping)
         
         # Basic validation
         required_columns = ['Team', 'Home_Away', 'Matches', 'Wins', 'Draws', 'Losses', 
