@@ -273,8 +273,8 @@ class MatchPredictor:
         """Calculate expected goals - SIMPLE and EFFECTIVE"""
         
         # Home xG = Home attack × (2.0 - Away defense) × Home advantage
-        home_raw = home.attack_strength * (2.0 - away.defense_strength)
-        home_xg = home_raw * (1.0 + self.league_config['home_advantage'])
+        home_raw = home.attack_strength * (1.0 + (1.0 - away.defense_strength))
+        home_xg = home_raw * (0.8 + self.league_config['home_advantage'])
         
         # Away xG = Away attack × (2.0 - Home defense) × Away factor
         away_raw = away.attack_strength * (2.0 - home.defense_strength)
