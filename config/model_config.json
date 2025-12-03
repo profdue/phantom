@@ -1,0 +1,14 @@
+{
+    "attack_weight": 0.6,
+    "defense_weight": 0.4,
+    "form_weight": 0.7,
+    "recent_weight": 0.8,
+    "season_weight": 0.2,
+    "home_advantage_multiplier": 1.18,
+    "prior_strength": 10,
+    "min_games_for_recent": 4,
+    "max_attack_strength": 1.8,
+    "min_attack_strength": 0.6,
+    "max_defense_strength": 1.6,
+    "min_defense_strength": 0.6
+}
