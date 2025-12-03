@@ -1,5 +1,5 @@
 """
-PHANTOM v4.1 - Betting Advisor with Fractional Kelly Staking
+PHANTOM v4.3 - Betting Advisor with Fractional Kelly Staking
 """
 from typing import Dict, Optional, List
 
