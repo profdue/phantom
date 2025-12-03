@@ -151,15 +151,21 @@ class LeagueAverages:
     actual_draw_rate: float = 0.25
     actual_away_win_rate: float = 0.30
     
+    def __post_init__(self):
+        """Calculate derived properties after initialization"""
+        # Ensure neutral_baseline is calculated
+        self._neutral_baseline = (self.avg_home_goals + self.avg_away_goals) / 2
+        self._league_avg_gpg = self._neutral_baseline
+        
     @property
     def neutral_baseline(self) -> float:
         """🔥 FIX 1: Neutral baseline for xG calculation"""
-        return (self.avg_home_goals + self.avg_away_goals) / 2
+        return self._neutral_baseline
     
     @property
     def league_avg_gpg(self) -> float:
         """League average per team per game - calculated property"""
-        return self.neutral_baseline
+        return self._league_avg_gpg
     
     @property
     def home_advantage_ratio(self) -> float:
