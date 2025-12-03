@@ -1,5 +1,5 @@
 """
-PHANTOM v4.3 - Data Loading & Utilities (UPDATED)
+PHANTOM v4.3 - Data Loading & Utilities
 """
 import pandas as pd
 import os
@@ -49,17 +49,12 @@ class DataLoader:
         avg_home_goals = total_home_goals / total_home_matches if total_home_matches > 0 else 1.5
         avg_away_goals = total_away_goals / total_away_matches if total_away_matches > 0 else 1.2
         
-        # League averages per team per game
-        total_goals = total_home_goals + total_away_goals
-        total_matches = (total_home_matches + total_away_matches) / 2  # Each match counted twice
-        
-        # Each team plays in each match, so divide by 2
-        league_avg_gpg = total_goals / (total_matches * 2) if total_matches > 0 else 1.45
-        
         # Calculate actual outcome rates from data
         total_home_wins = home_data['Wins'].sum()
         total_away_wins = away_data['Wins'].sum()
         total_draws = home_data['Draws'].sum()  # Same as away draws
+        
+        total_matches = (total_home_matches + total_away_matches) / 2
         
         actual_home_win_rate = total_home_wins / total_matches if total_matches > 0 else 0.45
         actual_away_win_rate = total_away_wins / total_matches if total_matches > 0 else 0.30
@@ -71,17 +66,16 @@ class DataLoader:
         print(f"  Total Away Goals: {total_away_goals} in {total_away_matches} matches")
         print(f"  Avg Home Goals: {avg_home_goals:.2f}")
         print(f"  Avg Away Goals: {avg_away_goals:.2f}")
-        print(f"  League Avg per Team: {league_avg_gpg:.2f}")
+        print(f"  Neutral Baseline: {(avg_home_goals + avg_away_goals) / 2:.2f}")
         print(f"  Total Matches Analyzed: {int(total_matches)}")
         print(f"  Home Win Rate: {actual_home_win_rate:.1%}")
         print(f"  Draw Rate: {actual_draw_rate:.1%}")
         print(f"  Away Win Rate: {actual_away_win_rate:.1%}")
         
-        # 🔥 FIX: Create LeagueAverages with correct parameters
+        # FIXED: Create LeagueAverages WITHOUT league_avg_gpg parameter
         return LeagueAverages(
             avg_home_goals=round(avg_home_goals, 3),
             avg_away_goals=round(avg_away_goals, 3),
-            league_avg_gpg=round(league_avg_gpg, 3),  # ✅ Now included
             total_matches=int(total_matches),
             actual_home_win_rate=round(actual_home_win_rate, 3),
             actual_draw_rate=round(actual_draw_rate, 3),
@@ -234,94 +228,3 @@ class PredictionLogger:
         except Exception as e:
             print(f"❌ Error logging prediction: {e}")
             return False
-    
-    def load_predictions(self, limit: int = 100) -> list:
-        """Load recent predictions from log"""
-        if not os.path.exists(self.log_file):
-            return []
-        
-        predictions = []
-        try:
-            with open(self.log_file, 'r') as f:
-                lines = f.readlines()[-limit:]  # Get last N lines
-                for line in lines:
-                    try:
-                        predictions.append(json.loads(line.strip()))
-                    except json.JSONDecodeError:
-                        continue
-        except Exception as e:
-            print(f"❌ Error loading predictions: {e}")
-        
-        return predictions
-    
-    def get_performance_metrics(self, min_samples: int = 10) -> Dict:
-        """Calculate performance metrics from logged predictions"""
-        predictions = self.load_predictions(limit=1000)
-        
-        if len(predictions) < min_samples:
-            return {"status": "insufficient_data", "samples": len(predictions)}
-        
-        # Calculate metrics
-        correct_wins = 0
-        total_wins = 0
-        correct_totals = 0
-        total_totals = 0
-        correct_btts = 0
-        total_btts = 0
-        
-        for pred in predictions:
-            if 'outcome' in pred:
-                # Simplified check - in practice you'd need actual outcomes
-                pass
-        
-        return {
-            "status": "calculated",
-            "total_predictions": len(predictions),
-            "win_accuracy": correct_wins / total_wins if total_wins > 0 else None,
-            "total_accuracy": correct_totals / total_totals if total_totals > 0 else None,
-            "btts_accuracy": correct_btts / total_btts if total_btts > 0 else None
-        }
-
-class PerformanceTracker:
-    """Track model performance over time"""
-    
-    def __init__(self):
-        self.predictions = []
-        self.weekly_performance = {}
-    
-    def add_prediction(self, prediction: Dict, actual_outcome: Dict = None):
-        """Add a prediction with optional actual outcome"""
-        entry = {
-            "timestamp": datetime.now(),
-            "prediction": prediction,
-            "actual": actual_outcome
-        }
-        self.predictions.append(entry)
-        
-        # Update weekly stats
-        week_key = datetime.now().strftime("%Y-%U")
-        if week_key not in self.weekly_performance:
-            self.weekly_performance[week_key] = {
-                "total": 0,
-                "correct": 0,
-                "predictions": []
-            }
-        
-        self.weekly_performance[week_key]["total"] += 1
-        if actual_outcome:
-            # Check if prediction was correct
-            # This would need actual outcome data
-            pass
-    
-    def get_weekly_report(self) -> Dict:
-        """Generate weekly performance report"""
-        report = {}
-        for week, data in self.weekly_performance.items():
-            if data["total"] > 0:
-                accuracy = data["correct"] / data["total"] if "correct" in data else None
-                report[week] = {
-                    "total_predictions": data["total"],
-                    "accuracy": accuracy,
-                    "sample_size": len(data["predictions"])
-                }
-        return report
