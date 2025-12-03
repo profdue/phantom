@@ -1,5 +1,5 @@
 """
-PHANTOM v4.2 - Data Loading & Utilities
+PHANTOM v4.3 - Data Loading & Utilities (UPDATED)
 """
 import pandas as pd
 import os
@@ -77,10 +77,11 @@ class DataLoader:
         print(f"  Draw Rate: {actual_draw_rate:.1%}")
         print(f"  Away Win Rate: {actual_away_win_rate:.1%}")
         
+        # 🔥 FIX: Create LeagueAverages with correct parameters
         return LeagueAverages(
             avg_home_goals=round(avg_home_goals, 3),
             avg_away_goals=round(avg_away_goals, 3),
-            league_avg_gpg=round(league_avg_gpg, 3),
+            league_avg_gpg=round(league_avg_gpg, 3),  # ✅ Now included
             total_matches=int(total_matches),
             actual_home_win_rate=round(actual_home_win_rate, 3),
             actual_draw_rate=round(actual_draw_rate, 3),
@@ -192,6 +193,7 @@ class DataLoader:
                 "total_matches": league_averages.total_matches,
                 "avg_home_goals": league_averages.avg_home_goals,
                 "avg_away_goals": league_averages.avg_away_goals,
+                "league_avg_gpg": league_averages.league_avg_gpg,
                 "issues": issues,
                 "status": "PASS" if not issues else "WARNINGS"
             }
