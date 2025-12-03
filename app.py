@@ -522,12 +522,13 @@ def main():
         if st.button("📥 **LOAD LEAGUE DATA**", type="primary", use_container_width=True):
             with st.spinner(f"Loading {selected_league_key} data..."):
                 try:
-                    # Load data using your simple data_loader
-                    home_df, away_df = st.session_state.data_loader.load_league_data(selected_league_key)
+                    # Load data - now getting 3 values
+                    home_df, away_df, league_averages = st.session_state.data_loader.load_league_data(selected_league_key)  # ✅ FIXED
                     
                     # Store in session state
                     st.session_state.home_df = home_df
                     st.session_state.away_df = away_df
+                    st.session_state.league_averages = league_averages  # ✅ NEW: Store league averages
                     st.session_state.league_name = selected_league_key
                     st.session_state.league_loaded = True
                     
@@ -637,22 +638,18 @@ def main():
         if st.button("🔥 **GENERATE STATISTICAL PREDICTION**", type="primary", use_container_width=True):
             with st.spinner("🔬 **Analyzing form and calculating probabilities...**"):
                 try:
-                    # Calculate league averages manually
-                    avg_home_goals = st.session_state.home_df['Goals'].sum() / st.session_state.home_df['Matches'].sum()
-                    avg_away_goals = st.session_state.away_df['Goals'].sum() / st.session_state.away_df['Matches'].sum()
+                    # Use the league averages already calculated and stored
+                    if 'league_averages' not in st.session_state:
+                        st.error("❌ League averages not calculated. Please load league data first.")
+                        return
                     
-                    # Create a simple league averages object
-                    class SimpleLeagueAverages:
-                        def __init__(self):
-                            self.avg_home_goals = avg_home_goals
-                            self.avg_away_goals = avg_away_goals
-                            self.neutral_baseline = (avg_home_goals + avg_away_goals) / 2
-                            self.total_matches = (st.session_state.home_df['Matches'].sum() + st.session_state.away_df['Matches'].sum()) / 2
-                            self.actual_home_win_rate = 0.45
-                            self.actual_draw_rate = 0.25
-                            self.actual_away_win_rate = 0.30
+                    league_averages = st.session_state.league_averages
                     
-                    league_averages = SimpleLeagueAverages()
+                    if debug_mode:
+                        print(f"\n📊 Using stored league averages:")
+                        print(f"  Avg Home Goals: {league_averages.avg_home_goals:.2f}")
+                        print(f"  Avg Away Goals: {league_averages.avg_away_goals:.2f}")
+                        print(f"  Neutral Baseline: {league_averages.neutral_baseline:.2f}")
                     
                     # Create team profiles with debug mode
                     home_profile = TeamProfile(
