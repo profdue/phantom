@@ -1,5 +1,6 @@
 """
-PHANTOM PREDICTOR v4.1 - Main Streamlit Application
+PHANTOM PREDICTOR v4.2 - Main Streamlit Application
+Statistically Validated • Form-First Logic • Risk-Aware Staking
 """
 import streamlit as st
 import pandas as pd
@@ -21,7 +22,7 @@ from betting_advisor import BettingAdvisor
 def setup_page():
     """Configure Streamlit page settings"""
     st.set_page_config(
-        page_title="PHANTOM PREDICTOR v4.1",
+        page_title="PHANTOM PREDICTOR v4.2",
         page_icon="🔥",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -73,12 +74,19 @@ def setup_page():
     .stProgress > div > div > div > div {
         background: linear-gradient(90deg, #FF4B4B, #FF8C42);
     }
+    .data-warning {
+        background-color: #fff3cd;
+        border-left: 5px solid #ffc107;
+        padding: 1rem;
+        border-radius: 5px;
+        margin: 1rem 0;
+    }
     </style>
     """, unsafe_allow_html=True)
     
     # Header
-    st.markdown('<h1 class="main-header">🔥 PHANTOM PREDICTOR v4.1</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Statistically Validated • Form-First Logic • Risk-Aware Staking</p>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🔥 PHANTOM PREDICTOR v4.2</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Statistically Validated • Form-First Logic • xG Integration • Risk-Aware Staking</p>', unsafe_allow_html=True)
 
 def display_welcome():
     """Display welcome screen when no league loaded"""
@@ -87,27 +95,27 @@ def display_welcome():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("### 📊 **STATISTICALLY VALIDATED**")
+        st.markdown("### 📊 **STATISTICAL RIGOR**")
         st.write("""
-        • Real league averages from data
-        • Proper probability calibration
-        • Dynamic reliability weighting
-        • No arbitrary multipliers
+        • Real Poisson probabilities
+        • xG/xGA integrated (70/30 blend)
+        • Proper home/away distinction
+        • League-average calibrated
         """)
     
     with col2:
         st.markdown("### 🎯 **FORM-FIRST LOGIC**")
         st.write("""
         • 70% weight to recent form
-        • No fake Last-3 data
-        • Continuous hot/cold adjustments
+        • Dynamic reliability weighting
+        • Conservative hot/cold adjustments
         • Sample-size awareness
         """)
     
     with col3:
         st.markdown("### ⚡ **RISK-AWARE**")
         st.write("""
-        • Fractional Kelly staking
+        • Fractional Kelly staking (¼ Kelly)
         • Edge-based betting decisions
         • Bankroll management
         • Clear confidence bounds
@@ -123,6 +131,14 @@ def display_welcome():
     4. Click **"GENERATE PREDICTION"**
     5. Get statistically validated predictions
     """)
+    
+    # Show available leagues if data loader exists
+    if 'data_loader' in st.session_state:
+        available = st.session_state.data_loader.available_leagues
+        if available:
+            st.markdown("### 📁 **AVAILABLE LEAGUES**")
+            leagues_list = [l.replace('_', ' ').title() for l in available.keys()]
+            st.write(", ".join(leagues_list))
 
 def display_team_stats(data: Dict, is_home: bool = True):
     """Display team statistics in a clean format"""
@@ -360,11 +376,12 @@ def display_prediction_results(result: Dict, betting_advisor: BettingAdvisor):
     home_xg = result['analysis']['expected_goals']['home']
     away_xg = result['analysis']['expected_goals']['away']
     
-    # Convert xG to likely scoreline
+    # Convert xG to likely scoreline using Poisson
+    # Simple rounding for display
     home_est = round(home_xg)
     away_est = round(away_xg)
     
-    # Ensure minimum goals
+    # Ensure minimum goals for reasonable xG
     if home_xg > 0.7 and home_est == 0:
         home_est = 1
     if away_xg > 0.7 and away_est == 0:
@@ -379,15 +396,15 @@ def display_prediction_results(result: Dict, betting_advisor: BettingAdvisor):
     
     # Footer
     st.markdown("---")
-    st.caption(f"⚡ PHANTOM v4.1 • League: {result['analysis']['league']} • Statistically Validated • Risk-Aware")
+    st.caption(f"⚡ PHANTOM v4.2 • League: {result['analysis']['league']} • Statistically Validated • xG Integration")
 
 def display_methodology():
-    """Display the v4.1 methodology"""
-    st.subheader("📖 **PHANTOM v4.1 METHODOLOGY**")
+    """Display the v4.2 methodology"""
+    st.subheader("📖 **PHANTOM v4.2 METHODOLOGY**")
     
     with st.expander("**View Complete Methodology**", expanded=True):
         st.markdown("""
-        ### 🔬 **STATISTICAL FOUNDATION**
+        ### 🔬 **STATISTICAL FOUNDATION v4.2**
         
         **1. FORM-FIRST PREDICTION**
         ```
@@ -397,83 +414,109 @@ def display_methodology():
         Season Form = Total Points / (Matches × 3)
         ```
         
-        **2. ATTACK & DEFENSE STRENGTHS**
+        **2. ATTACK & DEFENSE WITH xG INTEGRATION**
         ```
-        Attack Strength = Weighted GPG ÷ League Average GPG
+        Attack Strength = (Weighted Goals × 70% + Weighted xG × 30%) ÷ League Baseline
         
-        Weighted GPG = (Recent GPG × Recent Weight) + (Season GPG × Season Weight)
-        Recent Weight = 0.5 + (Recent Games Played ÷ 5 × 0.3)
+        Defense Strength = Opponent Baseline ÷ (Weighted GA × 70% + Weighted xGA × 30%)
         
-        Defense Strength = League Average GPG ÷ Weighted GAPG
-        Clamped to range: 0.5 (poor) to 1.5 (excellent)
-        ```
-        
-        **3. EXPECTED GOALS CALCULATION**
-        ```
-        Home xG = League Avg Home Goals × (Home Attack ÷ Away Defense) × Home Advantage
-        Away xG = League Avg Away Goals × (Away Attack ÷ Home Defense)
-        
-        • League averages calculated from actual CSV data
-        • Home advantage computed from data (typically 1.08-1.15)
-        • Hot attack boost: Continuous, capped at 15%
+        • Proper home/away baselines (home vs home avg, away vs away avg)
+        • Dynamic reliability weighting (50-80% based on recent games)
+        • Reasonable bounds: Attack 0.5-2.0, Defense 0.5-1.8
         ```
         
-        **4. PROBABILITY CALIBRATION**
+        **3. EXPECTED GOALS CALCULATION (NO DOUBLE ADVANTAGE)**
         ```
-        Draw Probability = Sigmoid function of total xG
-        Win Probabilities = Proportionally allocated remaining probability
-        Calibration = Blend with league historical rates (15% adjustment)
-        Confidence = Probability × 100 (bounded 30-85%)
-        ```
+        Base xG = League Avg per Team × (Attack / Opponent Defense)
+        Home xG = Base xG × Home Advantage (applied ONCE)
         
-        **5. VALIDATION & IMPROVEMENT**
-        ```
-        • Track predictions vs outcomes
-        • Generate calibration reports
-        • Adjust based on actual performance
-        • League-specific parameter tuning
+        • League average per team = ~1.47 (Premier League)
+        • Home advantage = 18% (from config, applied once)
+        • Conservative hot attack boost (max 5%)
+        • Realistic caps: Home ≤ 4.5, Away ≤ 4.0
         ```
         
-        ### 🎯 **KEY IMPROVEMENTS IN v4.1**
+        **4. REAL POISSON PROBABILITIES**
+        ```
+        Calculates full Poisson convolution (0-6 goals):
+        P(home_win) = Σ_i>j P(home=i) × P(away=j)
+        P(draw) = Σ_i=j P(home=i) × P(away=j)
+        P(away_win) = Σ_i<j P(home=i) × P(away=j)
         
-        **1. Real Data Foundation**
-        • No hardcoded league averages
-        • All statistics calculated from CSV data
-        • Home advantage computed per league
-        
-        **2. Statistical Validity**
-        • No arbitrary multipliers (removed ×1.2 scaling)
-        • No fake Last-3 data
-        • Proper probability calibration
-        • Dynamic reliability weighting
-        
-        **3. Risk Awareness**
-        • Fractional Kelly staking (¼ Kelly)
-        • Edge-based betting decisions
-        • Bankroll percentage limits
-        • Confidence-based fallback
-        
-        **4. Transparency**
-        • Every calculation traceable
-        • League averages displayed
-        • Confidence calibration shown
-        • Methodology fully documented
+        Fallback to proportional method if Poisson fails
         ```
         
-        ### 📊 **PERFORMANCE METRICS**
+        **5. PROPER BTTS CALCULATION**
+        ```
+        Uses Poisson estimation for games scored/conceded:
+        P(scored in game) = 1 - e^(-goals_per_game)
+        Expected both games = games × P(scored) × P(conceded)
         
-        **Target Accuracy Ranges:**
-        • Match Winner: 52-58%
-        • Over/Under 2.5: 54-60%
-        • BTTS: 53-58%
+        Tendency: 0.7 (low) to 1.3 (high) based on expected both games
+        ```
         
-        **Validation Metrics:**
-        • Calibration plots (confidence vs actual)
-        • Brier scores
-        • Return on investment tracking
-        • League-specific performance
+        **6. CALIBRATION & RELIABILITY**
+        ```
+        • Calibration: 15% blend with league historical rates
+        • Reliability: Less aggressive adjustment for sparse data
+        • Sample-size aware: Blends with league averages, not uniform 33%
+        ```
+        
+        ### 🎯 **KEY IMPROVEMENTS IN v4.2**
+        
+        **1. Fixed Critical Issues**
+        • ✅ No double home advantage
+        • ✅ BTTS uses Poisson estimation (not goals count)
+        • ✅ Real Poisson probabilities (not proportional)
+        • ✅ xG/xGA integrated in attack/defense
+        
+        **2. Statistical Rigor**
+        • ✅ Proper home/away baselines
+        • ✅ Realistic draw rates (25% at average xG)
+        • ✅ Conservative boosts and caps
+        • ✅ Dynamic reliability weighting
+        
+        **3. Practical Implementation**
+        • ✅ Debug mode for development
+        • ✅ Fallback methods for edge cases
+        • ✅ Realistic value bounds
+        • ✅ Transparent calculations
         ```
         """)
+
+def display_league_stats(league_averages, league_name):
+    """Display league statistics"""
+    with st.expander("📊 **LEAGUE STATISTICS**", expanded=False):
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Home Goals Avg", f"{league_averages.avg_home_goals:.2f}")
+            st.caption("Goals per home game")
+            
+        with col2:
+            st.metric("Away Goals Avg", f"{league_averages.avg_away_goals:.2f}")
+            st.caption("Goals per away game")
+            
+        with col3:
+            st.metric("League Avg per Team", f"{league_averages.league_avg_gpg:.2f}")
+            st.caption("Goals per team per game")
+            
+        with col4:
+            home_adv = league_averages.avg_home_goals / league_averages.avg_away_goals
+            st.metric("Home Advantage", f"{home_adv:.2f}x")
+            st.caption("Home goals / Away goals")
+        
+        # Outcome rates
+        st.markdown("#### 📈 **HISTORICAL OUTCOME RATES**")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Home Win Rate", f"{league_averages.actual_home_win_rate:.1%}")
+        with col2:
+            st.metric("Draw Rate", f"{league_averages.actual_draw_rate:.1%}")
+        with col3:
+            st.metric("Away Win Rate", f"{league_averages.actual_away_win_rate:.1%}")
+        
+        st.caption(f"Based on {league_averages.total_matches} matches analyzed")
 
 def main():
     """Main Streamlit application"""
@@ -482,16 +525,25 @@ def main():
     # Initialize session state
     if 'data_loader' not in st.session_state:
         st.session_state.data_loader = DataLoader()
+        print("✅ DataLoader initialized")
+    
     if 'betting_advisor' not in st.session_state:
-        st.session_state.betting_advisor = BettingAdvisor(bankroll=100.0)
+        st.session_state.betting_advisor = BettingAdvisor(bankroll=100.0, min_confidence=40.0)
+        print("✅ BettingAdvisor initialized")
+    
     if 'model_validator' not in st.session_state:
         st.session_state.model_validator = ModelValidator()
+    
     if 'prediction_logger' not in st.session_state:
         st.session_state.prediction_logger = PredictionLogger()
     
     # Sidebar
     with st.sidebar:
         st.header("⚙️ **CONFIGURATION**")
+        
+        # Debug mode toggle
+        debug_mode = st.checkbox("🔧 Debug Mode", value=False, 
+                                help="Show detailed calculation logs in terminal")
         
         # Bankroll setting
         bankroll = st.number_input(
@@ -503,6 +555,18 @@ def main():
             help="Total betting bankroll in units"
         )
         st.session_state.betting_advisor.update_bankroll(bankroll)
+        
+        # Minimum confidence threshold
+        min_confidence = st.slider(
+            "Minimum Confidence:",
+            min_value=30,
+            max_value=60,
+            value=40,
+            help="Minimum confidence percentage for betting"
+        )
+        st.session_state.betting_advisor.min_confidence = min_confidence
+        
+        st.markdown("---")
         
         # League selection
         available_leagues = st.session_state.data_loader.available_leagues
@@ -518,6 +582,15 @@ def main():
             ├── bundesliga_home_away.csv
             └── ligue_1_home_away.csv
             """)
+            
+            # Show what files were found
+            if os.path.exists("data"):
+                found_files = os.listdir("data")
+                if found_files:
+                    st.write("**Found files:**")
+                    for f in found_files:
+                        st.write(f"- {f}")
+            
             return
         
         selected_league_key = st.selectbox(
@@ -543,16 +616,8 @@ def main():
                     st.success(f"✅ **{selected_league_key.replace('_', ' ').title()} loaded successfully!**")
                     
                     # Display league statistics
-                    with st.expander("📊 **League Statistics**"):
-                        st.write(f"**Home Goals Avg:** {league_averages.avg_home_goals:.2f}")
-                        st.write(f"**Away Goals Avg:** {league_averages.avg_away_goals:.2f}")
-                        st.write(f"**League Goals PG:** {league_averages.league_avg_gpg:.2f}")
-                        st.write(f"**Home Advantage:** {league_averages.home_advantage:.3f}x")
-                        st.write(f"**Total Matches:** {league_averages.total_matches}")
-                        st.write(f"**Actual Home Win Rate:** {league_averages.actual_home_win_rate:.1%}")
-                        st.write(f"**Actual Draw Rate:** {league_averages.actual_draw_rate:.1%}")
-                        st.write(f"**Actual Away Win Rate:** {league_averages.actual_away_win_rate:.1%}")
-                        
+                    display_league_stats(league_averages, selected_league_key)
+                    
                 except Exception as e:
                     st.error(f"❌ **Error loading data:** {str(e)}")
                     st.session_state.league_loaded = False
@@ -568,39 +633,69 @@ def main():
             away_teams = st.session_state.away_df['Team'].nunique()
             st.info(f"📊 **{home_teams} home teams, {away_teams} away teams loaded**")
             
+            # Validate data integrity
+            if st.button("🔍 Validate Data", type="secondary", use_container_width=True):
+                with st.spinner("Validating data integrity..."):
+                    validation = st.session_state.data_loader.validate_data_integrity(
+                        st.session_state.league_name
+                    )
+                    
+                    if validation["status"] == "PASS":
+                        st.success("✅ Data validation passed!")
+                    elif validation["status"] == "WARNINGS":
+                        st.warning("⚠️ Data validation warnings:")
+                        for issue in validation["issues"]:
+                            st.write(f"- {issue}")
+                    else:
+                        st.error(f"❌ Data validation error: {validation.get('error', 'Unknown error')}")
+            
             # Show bankroll info
             risk_report = st.session_state.betting_advisor.get_risk_report()
             with st.expander("💰 **Risk Management**"):
                 st.write(f"**Bankroll:** {risk_report['bankroll']:.2f} units")
+                st.write(f"**Min Confidence:** {min_confidence}%")
                 st.write(f"**Max Single Bet:** {risk_report['max_single_bet']:.2f} units")
                 st.write(f"**Max Daily Exposure:** {risk_report['max_daily_exposure']:.2f} units")
                 st.write(f"**Weekly Loss Limit:** {risk_report['weekly_loss_limit']:.2f} units")
         
         st.markdown("---")
-        st.markdown("### 🎯 **v4.1 FEATURES**")
+        st.markdown("### 🎯 **v4.2 FEATURES**")
         st.info("""
-        **Statistically Validated:**
-        • Real league averages from data
-        • Proper probability calibration
-        • No arbitrary multipliers
-        • Form-first logic (70% recent)
+        **Statistical Rigor:**
+        • Real Poisson probabilities
+        • xG/xGA integrated (70/30)
+        • No double home advantage
+        • Proper BTTS calculation
         
         **Risk-Aware:**
         • Fractional Kelly staking
         • Edge-based decisions
         • Bankroll management
-        • Confidence bounds
+        • Debug mode available
         """)
         
         st.markdown("---")
-        if st.button("🔄 **Reset Session**", type="secondary", use_container_width=True):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 **Reset Session**", type="secondary", use_container_width=True):
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                st.rerun()
+        with col2:
+            if st.button("📖 **Methodology**", type="secondary", use_container_width=True):
+                st.session_state.show_methodology = True
     
     # Main content area
     if 'league_loaded' not in st.session_state or not st.session_state.league_loaded:
         display_welcome()
+        return
+    
+    # Check for methodology display
+    if 'show_methodology' in st.session_state and st.session_state.show_methodology:
+        display_methodology()
+        if st.button("← Back to Predictions", type="primary"):
+            del st.session_state.show_methodology
+            st.rerun()
         return
     
     # Team selection
@@ -655,14 +750,14 @@ def main():
             if st.button("🔥 **GENERATE STATISTICAL PREDICTION**", type="primary", use_container_width=True):
                 with st.spinner("🔬 **Analyzing form and calculating probabilities...**"):
                     try:
-                        # Create team profiles
+                        # Create team profiles with debug mode
                         home_profile = TeamProfile(
                             data_dict=st.session_state.home_df[
                                 st.session_state.home_df['Team'] == selected_home
                             ].iloc[0].to_dict(),
                             is_home=True,
-                            league_avg_gpg=st.session_state.league_averages.league_avg_gpg,
-                            league_averages=st.session_state.league_averages
+                            league_averages=st.session_state.league_averages,
+                            debug=debug_mode
                         )
                         
                         away_profile = TeamProfile(
@@ -670,14 +765,15 @@ def main():
                                 st.session_state.away_df['Team'] == selected_away
                             ].iloc[0].to_dict(),
                             is_home=False,
-                            league_avg_gpg=st.session_state.league_averages.league_avg_gpg,
-                            league_averages=st.session_state.league_averages
+                            league_averages=st.session_state.league_averages,
+                            debug=debug_mode
                         )
                         
-                        # Create predictor with league averages
+                        # Create predictor with debug mode
                         predictor = MatchPredictor(
                             league_name=st.session_state.league_name,
-                            league_averages=st.session_state.league_averages
+                            league_averages=st.session_state.league_averages,
+                            debug=debug_mode
                         )
                         
                         # Generate prediction
@@ -689,7 +785,7 @@ def main():
                         result['analysis']['league_stats'] = {
                             'home_goals_avg': st.session_state.league_averages.avg_home_goals,
                             'away_goals_avg': st.session_state.league_averages.avg_away_goals,
-                            'home_advantage': st.session_state.league_averages.home_advantage
+                            'league_avg_gpg': st.session_state.league_averages.league_avg_gpg
                         }
                         
                         # Store in session
@@ -701,7 +797,11 @@ def main():
                             "away_team": selected_away,
                             "league": st.session_state.league_name,
                             "predictions": result['predictions'],
-                            "analysis": result['analysis']
+                            "analysis": {
+                                "expected_goals": result['analysis']['expected_goals'],
+                                "form_scores": result['analysis']['form_scores']
+                            },
+                            "timestamp": datetime.now().isoformat()
                         }
                         st.session_state.prediction_logger.log_prediction(log_data)
                         
@@ -710,18 +810,29 @@ def main():
                         
                     except Exception as e:
                         st.error(f"❌ **Prediction error:** {str(e)}")
-                        import traceback
-                        st.error(f"**Debug:** {traceback.format_exc()}")
+                        if debug_mode:
+                            import traceback
+                            st.code(traceback.format_exc(), language="python")
         
         with col2:
-            if st.button("📖 **Methodology**", type="secondary", use_container_width=True):
+            if st.button("📊 **Methodology**", type="secondary", use_container_width=True):
                 display_methodology()
         
         # Display last prediction if exists
         if 'last_prediction' in st.session_state:
             st.markdown("---")
-            with st.expander("📋 **View Last Prediction Details**"):
+            with st.expander("📋 **View Last Prediction Details**", expanded=False):
                 st.json(st.session_state.last_prediction, expanded=False)
+            
+            # Data warning if unrealistic values
+            total_xg = st.session_state.last_prediction['analysis']['expected_goals']['total']
+            if total_xg > 5.0:
+                st.markdown("""
+                <div class="data-warning">
+                ⚠️ **Note:** Predicted total xG ({:.1f}) is unusually high. 
+                This may indicate data issues or extreme team form.
+                </div>
+                """.format(total_xg), unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
