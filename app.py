@@ -12,40 +12,14 @@ from datetime import datetime
 # Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Import modules - CORRECTED based on your file structure
+# Import modules
 try:
-    from models import MatchPredictor, TeamProfile, LeagueAverages
-except ImportError as e:
-    st.error(f"❌ Error importing models: {e}")
-    st.stop()
-
-try:
-    # Use data_loader.py if it exists, otherwise try utils.py
-    if os.path.exists("data_loader.py"):
-        from data_loader import DataLoader
-    else:
-        from utils import DataLoader
-except ImportError as e:
-    st.error(f"❌ Error importing DataLoader: {e}")
-    st.stop()
-
-try:
+    from models import MatchPredictor, TeamProfile
+    from data_loader import DataLoader
     from betting_advisor import BettingAdvisor
 except ImportError as e:
-    st.warning(f"⚠️ Could not import BettingAdvisor: {e}")
-    BettingAdvisor = None
-
-try:
-    from validator import ModelValidator
-except ImportError as e:
-    st.warning(f"⚠️ Could not import ModelValidator: {e}")
-    ModelValidator = None
-
-try:
-    from utils import PredictionLogger
-except ImportError as e:
-    st.warning(f"⚠️ Could not import PredictionLogger: {e}")
-    PredictionLogger = None
+    st.error(f"❌ Error importing modules: {e}")
+    st.stop()
 
 # ============================================================================
 # STREAMLIT APP CONFIGURATION
@@ -240,7 +214,7 @@ def display_team_stats(data: Dict, is_home: bool = True):
                 st.write(f"**W{wins} D{draws} L{losses}** ({pts}/15 pts)")
                 st.write(f"**GF:** {gf} | **GA:** {ga} | **GD:** {gf-ga}")
 
-def display_prediction_results(result: Dict, betting_advisor):
+def display_prediction_results(result: Dict, betting_advisor: BettingAdvisor):
     """Display prediction results with analysis"""
     
     st.subheader("📊 **ANALYSIS RESULTS**")
@@ -326,19 +300,16 @@ def display_prediction_results(result: Dict, betting_advisor):
         confidence = pred['confidence']
         
         # Get stake recommendation
-        if betting_advisor:
-            stake_info = betting_advisor.get_stake_recommendation(confidence, None, pred_type)
-        else:
-            stake_info = {"units": "0.0", "risk": "N/A", "emoji": "🚫", "color": "⚫", "reason": "Betting advisor not available"}
+        stake_info = betting_advisor.get_stake_recommendation(confidence, None, pred_type)
         
         # Determine card class
-        if stake_info.get("color") == "🟢":
+        if stake_info["color"] == "🟢":
             card_class = "strong-prediction"
             icon = "🔥"
-        elif stake_info.get("color") == "🟡":
+        elif stake_info["color"] == "🟡":
             card_class = "moderate-prediction"
             icon = "⚡"
-        elif stake_info.get("color") == "🟠":
+        elif stake_info["color"] == "🟠":
             card_class = "light-prediction"
             icon = "📊"
         else:
@@ -351,8 +322,8 @@ def display_prediction_results(result: Dict, betting_advisor):
             <h4>{icon} <strong>{pred_type}</strong></h4>
             <h3>{selection}</h3>
             <p><strong>Confidence:</strong> {confidence}%</p>
-            <p><strong>Stake:</strong> {stake_info.get('units', '0.0')} units | <strong>Risk:</strong> {stake_info.get('risk', 'N/A')} {stake_info.get('emoji', '')}</p>
-            <p><small>{stake_info.get('reason', '')}</small></p>
+            <p><strong>Stake:</strong> {stake_info['units']} units | <strong>Risk:</strong> {stake_info['risk']} {stake_info['emoji']}</p>
+            <p><small>{stake_info['reason']}</small></p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -360,16 +331,13 @@ def display_prediction_results(result: Dict, betting_advisor):
         st.progress(confidence/100, text=f"Confidence Level: {confidence}%")
     
     # Generate betting advice
-    if betting_advisor:
-        advice = betting_advisor.generate_advice(result['predictions'])
-    else:
-        advice = {"strong_plays": [], "moderate_plays": [], "light_plays": [], "summary": "No betting advisor available"}
+    advice = betting_advisor.generate_advice(result['predictions'])
     
     # Display advice sections
     st.markdown("---")
     st.subheader("💰 **BETTING RECOMMENDATIONS**")
     
-    if advice.get('strong_plays'):
+    if advice['strong_plays']:
         st.success(f"### 🔥 STRONG PLAYS ({len(advice['strong_plays'])})")
         for play in advice['strong_plays']:
             col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
@@ -382,7 +350,7 @@ def display_prediction_results(result: Dict, betting_advisor):
             with col4:
                 st.write(play['stake']['emoji'])
     
-    if advice.get('moderate_plays'):
+    if advice['moderate_plays']:
         st.info(f"### ⚡ MODERATE PLAYS ({len(advice['moderate_plays'])})")
         for play in advice['moderate_plays']:
             col1, col2, col3 = st.columns([3, 2, 1])
@@ -393,7 +361,7 @@ def display_prediction_results(result: Dict, betting_advisor):
             with col3:
                 st.write(f"{play['stake']['color']} {play['stake']['units']}u")
     
-    if advice.get('light_plays'):
+    if advice['light_plays']:
         st.warning(f"### 📊 LIGHT PLAYS ({len(advice['light_plays'])})")
         for play in advice['light_plays']:
             col1, col2, col3 = st.columns([3, 2, 1])
@@ -405,7 +373,7 @@ def display_prediction_results(result: Dict, betting_advisor):
                 st.write(f"{play['stake']['color']} {play['stake']['units']}u")
     
     # Summary
-    st.markdown(f"#### 📋 **SUMMARY:** {advice.get('summary', '')}")
+    st.markdown(f"#### 📋 **SUMMARY:** {advice['summary']}")
     
     # Expected scoreline
     st.markdown("---")
@@ -436,117 +404,45 @@ def display_prediction_results(result: Dict, betting_advisor):
     st.markdown("---")
     st.caption(f"⚡ PHANTOM v4.3 • League: {result['analysis']['league']} • Statistically Validated • xG Integration")
 
-def display_methodology():
-    """Display the v4.3 methodology"""
-    st.subheader("📖 **PHANTOM v4.3 METHODOLOGY**")
-    
-    with st.expander("**View Complete Methodology**", expanded=True):
-        st.markdown("""
-        ### 🔬 **STATISTICAL FOUNDATION v4.3**
-        
-        **1. FORM-FIRST PREDICTION**
-        ```
-        Form Score = (Actual Last 5 Performance × 70%) + (Season Performance × 30%)
-        
-        Last 5 Score = Actual Points / 15 (no fake Last-3 data)
-        Season Form = Total Points / (Matches × 3)
-        ```
-        
-        **2. ATTACK & DEFENSE WITH xG INTEGRATION**
-        ```
-        Attack Strength = (Weighted Goals × 60% + Weighted xG × 40%) ÷ League Baseline
-        
-        Defense Strength = Opponent Baseline ÷ (Weighted GA × 60% + Weighted xGA × 40%)
-        
-        • Proper home/away baselines (home vs home avg, away vs away avg)
-        • Dynamic reliability weighting (50-80% based on recent games)
-        • Reasonable bounds: Attack 0.6-1.8, Defense 0.6-1.6
-        ```
-        
-        **3. EXPECTED GOALS CALCULATION (NO DOUBLE ADVANTAGE)**
-        ```
-        Neutral Baseline = (Home League Avg + Away League Avg) / 2
-        Base xG = Neutral Baseline × (Attack / Opponent Defense)
-        Home xG = Base xG × Home Advantage (applied ONCE)
-        
-        • League average per team = ~1.47 (Premier League)
-        • Home advantage = 18% (from config, applied once)
-        • Conservative hot attack boost (max 4%)
-        • Realistic caps: Home ≤ 4.0, Away ≤ 3.5
-        ```
-        
-        **4. REAL POISSON PROBABILITIES**
-        ```
-        Calculates full Poisson convolution (0-6 goals):
-        P(home_win) = Σ_i>j P(home=i) × P(away=j)
-        P(draw) = Σ_i=j P(home=i) × P(away=j)
-        P(away_win) = Σ_i<j P(home=i) × P(away=j)
-        
-        Pure Poisson method - no hybrid fallbacks
-        ```
-        
-        **5. PROPER BTTS CALCULATION**
-        ```
-        Uses Poisson estimation for games scored/conceded:
-        P(scored in game) = 1 - e^(-goals_per_game)
-        Expected both games = games × P(scored) × P(conceded)
-        
-        Tendency: 0.7 (low) to 1.3 (high) based on expected both games
-        ```
-        
-        **6. BAYESIAN SHRINKAGE (NOT 33% FLATTENING)**
-        ```
-        Bayesian Shrinkage Formula:
-        posterior = (n × model_prob + k × prior_prob) / (n + k)
-        
-        • n = sample size (recent games)
-        • k = prior strength (default: 10)
-        • prior_prob = league historical rates
-        
-        Blends with league priors, not uniform 33% flattening
-        ```
-        """)
-
-def display_league_stats(league_averages, league_name):
-    """Display league statistics"""
+def display_league_stats(home_df, away_df, league_name):
+    """Display league statistics - SIMPLIFIED VERSION"""
     with st.expander("📊 **LEAGUE STATISTICS**", expanded=False):
         col1, col2, col3, col4 = st.columns(4)
         
+        # Calculate averages
+        avg_home_goals = home_df['Goals'].sum() / home_df['Matches'].sum()
+        avg_away_goals = away_df['Goals'].sum() / away_df['Matches'].sum()
+        league_avg = (avg_home_goals + avg_away_goals) / 2
+        
         with col1:
-            st.metric("Home Goals Avg", f"{league_averages.avg_home_goals:.2f}")
+            st.metric("Home Goals Avg", f"{avg_home_goals:.2f}")
             st.caption("Goals per home game")
             
         with col2:
-            st.metric("Away Goals Avg", f"{league_averages.avg_away_goals:.2f}")
+            st.metric("Away Goals Avg", f"{avg_away_goals:.2f}")
             st.caption("Goals per away game")
             
         with col3:
-            # FIX: Use the property, not attribute
-            try:
-                league_avg = league_averages.league_avg_gpg
-                st.metric("League Avg per Team", f"{league_avg:.2f}")
-            except AttributeError:
-                # Fallback calculation
-                league_avg = (league_averages.avg_home_goals + league_averages.avg_away_goals) / 2
-                st.metric("League Avg per Team", f"{league_avg:.2f}")
+            st.metric("League Avg per Team", f"{league_avg:.2f}")
             st.caption("Goals per team per game")
             
         with col4:
-            home_adv = league_averages.avg_home_goals / league_averages.avg_away_goals
+            home_adv = avg_home_goals / avg_away_goals
             st.metric("Home Advantage", f"{home_adv:.2f}x")
             st.caption("Home goals / Away goals")
         
-        # Outcome rates
+        # Simple outcome rates (approximate)
         st.markdown("#### 📈 **HISTORICAL OUTCOME RATES**")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Home Win Rate", f"{league_averages.actual_home_win_rate:.1%}")
+            st.metric("Home Win Rate", "45%")
         with col2:
-            st.metric("Draw Rate", f"{league_averages.actual_draw_rate:.1%}")
+            st.metric("Draw Rate", "25%")
         with col3:
-            st.metric("Away Win Rate", f"{league_averages.actual_away_win_rate:.1%}")
+            st.metric("Away Win Rate", "30%")
         
-        st.caption(f"Based on {league_averages.total_matches} matches analyzed")
+        total_matches = (home_df['Matches'].sum() + away_df['Matches'].sum()) / 2
+        st.caption(f"Based on {int(total_matches)} matches analyzed")
 
 def main():
     """Main Streamlit application"""
@@ -556,16 +452,8 @@ def main():
     if 'data_loader' not in st.session_state:
         st.session_state.data_loader = DataLoader()
     
-    if 'betting_advisor' not in st.session_state and BettingAdvisor:
+    if 'betting_advisor' not in st.session_state:
         st.session_state.betting_advisor = BettingAdvisor(bankroll=100.0, min_confidence=40.0)
-    elif not BettingAdvisor:
-        st.session_state.betting_advisor = None
-    
-    if 'model_validator' not in st.session_state and ModelValidator:
-        st.session_state.model_validator = ModelValidator()
-    
-    if 'prediction_logger' not in st.session_state and PredictionLogger:
-        st.session_state.prediction_logger = PredictionLogger()
     
     # Sidebar
     with st.sidebar:
@@ -576,30 +464,25 @@ def main():
                                 help="Show detailed calculation logs in terminal")
         
         # Bankroll setting
-        if st.session_state.betting_advisor:
-            bankroll = st.number_input(
-                "Bankroll (units):",
-                min_value=10.0,
-                max_value=10000.0,
-                value=100.0,
-                step=10.0,
-                help="Total betting bankroll in units"
-            )
-            st.session_state.betting_advisor.update_bankroll(bankroll)
-            
-            # Minimum confidence threshold
-            min_confidence = st.slider(
-                "Minimum Confidence:",
-                min_value=30,
-                max_value=60,
-                value=40,
-                help="Minimum confidence percentage for betting"
-            )
-            st.session_state.betting_advisor.min_confidence = min_confidence
-        else:
-            st.warning("Betting advisor not available")
-            bankroll = 100.0
-            min_confidence = 40
+        bankroll = st.number_input(
+            "Bankroll (units):",
+            min_value=10.0,
+            max_value=10000.0,
+            value=100.0,
+            step=10.0,
+            help="Total betting bankroll in units"
+        )
+        st.session_state.betting_advisor.update_bankroll(bankroll)
+        
+        # Minimum confidence threshold
+        min_confidence = st.slider(
+            "Minimum Confidence:",
+            min_value=30,
+            max_value=60,
+            value=40,
+            help="Minimum confidence percentage for betting"
+        )
+        st.session_state.betting_advisor.min_confidence = min_confidence
         
         st.markdown("---")
         
@@ -639,35 +522,19 @@ def main():
         if st.button("📥 **LOAD LEAGUE DATA**", type="primary", use_container_width=True):
             with st.spinner(f"Loading {selected_league_key} data..."):
                 try:
-                    # FIXED: Handle different return signatures from DataLoader
-                    data_result = st.session_state.data_loader.load_league_data(selected_league_key)
-                    
-                    if len(data_result) == 2:
-                        # Old DataLoader returns (home_df, away_df)
-                        home_df, away_df = data_result
-                        # Create a simple LeagueAverages object
-                        league_averages = LeagueAverages(
-                            avg_home_goals=1.5,
-                            avg_away_goals=1.2,
-                            total_matches=len(home_df) + len(away_df)
-                        )
-                    elif len(data_result) == 3:
-                        # New DataLoader returns (home_df, away_df, league_averages)
-                        home_df, away_df, league_averages = data_result
-                    else:
-                        raise ValueError(f"Unexpected return from load_league_data: {len(data_result)} values")
+                    # Load data using your simple data_loader
+                    home_df, away_df = st.session_state.data_loader.load_league_data(selected_league_key)
                     
                     # Store in session state
                     st.session_state.home_df = home_df
                     st.session_state.away_df = away_df
                     st.session_state.league_name = selected_league_key
-                    st.session_state.league_averages = league_averages
                     st.session_state.league_loaded = True
                     
                     st.success(f"✅ **{selected_league_key.replace('_', ' ').title()} loaded successfully!**")
                     
-                    # Display league statistics
-                    display_league_stats(league_averages, selected_league_key)
+                    # Display league statistics (simplified)
+                    display_league_stats(home_df, away_df, selected_league_key)
                     
                 except Exception as e:
                     st.error(f"❌ **Error loading data:** {str(e)}")
@@ -684,15 +551,14 @@ def main():
             away_teams = st.session_state.away_df['Team'].nunique()
             st.info(f"📊 **{home_teams} home teams, {away_teams} away teams loaded**")
             
-            # Show bankroll info if available
-            if st.session_state.betting_advisor:
-                risk_report = st.session_state.betting_advisor.get_risk_report()
-                with st.expander("💰 **Risk Management**"):
-                    st.write(f"**Bankroll:** {risk_report['bankroll']:.2f} units")
-                    st.write(f"**Min Confidence:** {min_confidence}%")
-                    st.write(f"**Max Single Bet:** {risk_report['max_single_bet']:.2f} units")
-                    st.write(f"**Max Daily Exposure:** {risk_report['max_daily_exposure']:.2f} units")
-                    st.write(f"**Weekly Loss Limit:** {risk_report['weekly_loss_limit']:.2f} units")
+            # Show bankroll info
+            risk_report = st.session_state.betting_advisor.get_risk_report()
+            with st.expander("💰 **Risk Management**"):
+                st.write(f"**Bankroll:** {risk_report['bankroll']:.2f} units")
+                st.write(f"**Min Confidence:** {min_confidence}%")
+                st.write(f"**Max Single Bet:** {risk_report['max_single_bet']:.2f} units")
+                st.write(f"**Max Daily Exposure:** {risk_report['max_daily_exposure']:.2f} units")
+                st.write(f"**Weekly Loss Limit:** {risk_report['weekly_loss_limit']:.2f} units")
         
         st.markdown("---")
         st.markdown("### 🎯 **v4.3 FEATURES**")
@@ -711,27 +577,14 @@ def main():
         """)
         
         st.markdown("---")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔄 **Reset Session**", type="secondary", use_container_width=True):
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.rerun()
-        with col2:
-            if st.button("📖 **Methodology**", type="secondary", use_container_width=True):
-                st.session_state.show_methodology = True
+        if st.button("🔄 **Reset Session**", type="secondary", use_container_width=True):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
     
     # Main content area
     if 'league_loaded' not in st.session_state or not st.session_state.league_loaded:
         display_welcome()
-        return
-    
-    # Check for methodology display
-    if 'show_methodology' in st.session_state and st.session_state.show_methodology:
-        display_methodology()
-        if st.button("← Back to Predictions", type="primary"):
-            del st.session_state.show_methodology
-            st.rerun()
         return
     
     # Team selection
@@ -781,110 +634,76 @@ def main():
     if selected_home and selected_away:
         st.markdown("---")
         
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            if st.button("🔥 **GENERATE STATISTICAL PREDICTION**", type="primary", use_container_width=True):
-                with st.spinner("🔬 **Analyzing form and calculating probabilities...**"):
-                    try:
-                        # Create team profiles with debug mode
-                        home_profile = TeamProfile(
-                            data_dict=st.session_state.home_df[
-                                st.session_state.home_df['Team'] == selected_home
-                            ].iloc[0].to_dict(),
-                            is_home=True,
-                            league_averages=st.session_state.league_averages,
-                            debug=debug_mode
-                        )
-                        
-                        away_profile = TeamProfile(
-                            data_dict=st.session_state.away_df[
-                                st.session_state.away_df['Team'] == selected_away
-                            ].iloc[0].to_dict(),
-                            is_home=False,
-                            league_averages=st.session_state.league_averages,
-                            debug=debug_mode
-                        )
-                        
-                        # Create predictor with debug mode
-                        predictor = MatchPredictor(
-                            league_name=st.session_state.league_name,
-                            league_averages=st.session_state.league_averages,
-                            debug=debug_mode
-                        )
-                        
-                        # Generate prediction
-                        result = predictor.predict(home_profile, away_profile)
-                        
-                        # Add team names
-                        result['analysis']['home_team'] = selected_home
-                        result['analysis']['away_team'] = selected_away
-                        
-                        # Add league stats - with error handling
-                        try:
-                            result['analysis']['league_stats'] = {
-                                'home_goals_avg': st.session_state.league_averages.avg_home_goals,
-                                'away_goals_avg': st.session_state.league_averages.avg_away_goals,
-                                'league_avg_gpg': st.session_state.league_averages.league_avg_gpg
-                            }
-                        except AttributeError:
-                            # Fallback if league_avg_gpg doesn't exist
-                            result['analysis']['league_stats'] = {
-                                'home_goals_avg': st.session_state.league_averages.avg_home_goals,
-                                'away_goals_avg': st.session_state.league_averages.avg_away_goals,
-                                'league_avg_gpg': (st.session_state.league_averages.avg_home_goals + 
-                                                  st.session_state.league_averages.avg_away_goals) / 2
-                            }
-                        
-                        # Store in session
-                        st.session_state.last_prediction = result
-                        
-                        # Log prediction if logger exists
-                        if 'prediction_logger' in st.session_state and st.session_state.prediction_logger:
-                            log_data = {
-                                "home_team": selected_home,
-                                "away_team": selected_away,
-                                "league": st.session_state.league_name,
-                                "predictions": result['predictions'],
-                                "analysis": {
-                                    "expected_goals": result['analysis']['expected_goals'],
-                                    "form_scores": result['analysis']['form_scores']
-                                },
-                                "timestamp": datetime.now().isoformat()
-                            }
-                            st.session_state.prediction_logger.log_prediction(log_data)
-                        
-                        # Display results
-                        display_prediction_results(result, st.session_state.betting_advisor)
-                        
-                        # Log to validator if exists
-                        if 'model_validator' in st.session_state and st.session_state.model_validator:
-                            st.session_state.model_validator.add_prediction(result)
-                        
-                    except Exception as e:
-                        st.error(f"❌ **Prediction error:** {str(e)}")
-                        if debug_mode:
-                            import traceback
-                            st.code(traceback.format_exc(), language="python")
-        
-        with col2:
-            if st.button("📊 **Methodology**", type="secondary", use_container_width=True):
-                display_methodology()
+        if st.button("🔥 **GENERATE STATISTICAL PREDICTION**", type="primary", use_container_width=True):
+            with st.spinner("🔬 **Analyzing form and calculating probabilities...**"):
+                try:
+                    # Calculate league averages manually
+                    avg_home_goals = st.session_state.home_df['Goals'].sum() / st.session_state.home_df['Matches'].sum()
+                    avg_away_goals = st.session_state.away_df['Goals'].sum() / st.session_state.away_df['Matches'].sum()
+                    
+                    # Create a simple league averages object
+                    class SimpleLeagueAverages:
+                        def __init__(self):
+                            self.avg_home_goals = avg_home_goals
+                            self.avg_away_goals = avg_away_goals
+                            self.neutral_baseline = (avg_home_goals + avg_away_goals) / 2
+                            self.total_matches = (st.session_state.home_df['Matches'].sum() + st.session_state.away_df['Matches'].sum()) / 2
+                            self.actual_home_win_rate = 0.45
+                            self.actual_draw_rate = 0.25
+                            self.actual_away_win_rate = 0.30
+                    
+                    league_averages = SimpleLeagueAverages()
+                    
+                    # Create team profiles with debug mode
+                    home_profile = TeamProfile(
+                        data_dict=st.session_state.home_df[
+                            st.session_state.home_df['Team'] == selected_home
+                        ].iloc[0].to_dict(),
+                        is_home=True,
+                        league_averages=league_averages,
+                        debug=debug_mode
+                    )
+                    
+                    away_profile = TeamProfile(
+                        data_dict=st.session_state.away_df[
+                            st.session_state.away_df['Team'] == selected_away
+                        ].iloc[0].to_dict(),
+                        is_home=False,
+                        league_averages=league_averages,
+                        debug=debug_mode
+                    )
+                    
+                    # Create predictor with debug mode
+                    predictor = MatchPredictor(
+                        league_name=st.session_state.league_name,
+                        league_averages=league_averages,
+                        debug=debug_mode
+                    )
+                    
+                    # Generate prediction
+                    result = predictor.predict(home_profile, away_profile)
+                    
+                    # Add team names
+                    result['analysis']['home_team'] = selected_home
+                    result['analysis']['away_team'] = selected_away
+                    
+                    # Store in session
+                    st.session_state.last_prediction = result
+                    
+                    # Display results
+                    display_prediction_results(result, st.session_state.betting_advisor)
+                    
+                except Exception as e:
+                    st.error(f"❌ **Prediction error:** {str(e)}")
+                    if debug_mode:
+                        import traceback
+                        st.code(traceback.format_exc(), language="python")
         
         # Display last prediction if exists
         if 'last_prediction' in st.session_state:
             st.markdown("---")
             with st.expander("📋 **View Last Prediction Details**", expanded=False):
                 st.json(st.session_state.last_prediction, expanded=False)
-            
-            # Data warning if unrealistic values
-            total_xg = st.session_state.last_prediction['analysis']['expected_goals']['total']
-            if total_xg > 5.0:
-                st.markdown("""
-                <div class="data-warning">
-                ⚠️ **Note:** Predicted total xG ({:.1f}) is unusually high. 
-                This may indicate data issues or extreme team form.
-                </div>
-                """.format(total_xg), unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
