@@ -72,7 +72,8 @@ class DataLoader:
         print(f"  Draw Rate: {actual_draw_rate:.1%}")
         print(f"  Away Win Rate: {actual_away_win_rate:.1%}")
         
-        # FIXED: Create LeagueAverages WITHOUT league_avg_gpg parameter
+        # ✅ FIXED: Create LeagueAverages WITHOUT league_avg_gpg parameter
+        # It's a calculated property, not a constructor parameter
         return LeagueAverages(
             avg_home_goals=round(avg_home_goals, 3),
             avg_away_goals=round(avg_away_goals, 3),
@@ -181,13 +182,14 @@ class DataLoader:
             if league_averages.avg_away_goals > 2.5:
                 issues.append(f"Unrealistically high away goals average: {league_averages.avg_away_goals:.2f}")
             
+            # ✅ FIXED: Access league_avg_gpg as a property, not pass it in constructor
             return {
                 "league": league_name,
                 "total_teams": len(home_df) + len(away_df),
                 "total_matches": league_averages.total_matches,
                 "avg_home_goals": league_averages.avg_home_goals,
                 "avg_away_goals": league_averages.avg_away_goals,
-                "league_avg_gpg": league_averages.league_avg_gpg,
+                "league_avg_gpg": league_averages.league_avg_gpg,  # ✅ Access as property
                 "issues": issues,
                 "status": "PASS" if not issues else "WARNINGS"
             }
