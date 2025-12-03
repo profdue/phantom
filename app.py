@@ -1,7 +1,6 @@
 """
 PHANTOM PREDICTOR v4.3 - Main Streamlit Application
 Statistically Validated • Form-First Logic • Risk-Aware Staking
-UPDATED IMPORTS
 """
 import streamlit as st
 import pandas as pd
@@ -13,11 +12,11 @@ from datetime import datetime
 # Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# CORRECTED IMPORTS
-from models import MatchPredictor, TeamProfile  # Removed ModelValidator from here
+# Import modules
+from models import MatchPredictor, TeamProfile
 from utils import DataLoader, PredictionLogger
 from betting_advisor import BettingAdvisor
-from validator import ModelValidator  # Now imported from validator.py
+from validator import ModelValidator
 
 # ============================================================================
 # STREAMLIT APP CONFIGURATION
@@ -471,27 +470,6 @@ def display_methodology():
         
         Blends with league priors, not uniform 33% flattening
         ```
-        
-        ### 🎯 **KEY IMPROVEMENTS IN v4.3**
-        
-        **1. Fixed Critical Issues**
-        • ✅ No double home advantage
-        • ✅ BTTS uses Poisson estimation (not goals count)
-        • ✅ Real Poisson probabilities (not proportional)
-        • ✅ Bayesian shrinkage (not 33% flattening)
-        
-        **2. Statistical Rigor**
-        • ✅ Proper neutral baseline xG
-        • ✅ Realistic draw rates (25% at average xG)
-        • ✅ Conservative boosts and caps
-        • ✅ Dynamic reliability weighting
-        
-        **3. Validation System**
-        • ✅ Synthetic backtesting
-        • ✅ Calibration curves
-        • ✅ Statistical significance testing
-        • ✅ Market efficiency analysis
-        ```
         """)
 
 def display_league_stats(league_averages, league_name):
@@ -535,19 +513,15 @@ def main():
     # Initialize session state
     if 'data_loader' not in st.session_state:
         st.session_state.data_loader = DataLoader()
-        print("✅ DataLoader initialized")
     
     if 'betting_advisor' not in st.session_state:
         st.session_state.betting_advisor = BettingAdvisor(bankroll=100.0, min_confidence=40.0)
-        print("✅ BettingAdvisor initialized")
     
     if 'model_validator' not in st.session_state:
         st.session_state.model_validator = ModelValidator()
-        print("✅ ModelValidator initialized")
     
     if 'prediction_logger' not in st.session_state:
         st.session_state.prediction_logger = PredictionLogger()
-        print("✅ PredictionLogger initialized")
     
     # Sidebar
     with st.sidebar:
@@ -577,21 +551,6 @@ def main():
             help="Minimum confidence percentage for betting"
         )
         st.session_state.betting_advisor.min_confidence = min_confidence
-        
-        # Run validation button
-        if st.button("🧪 **RUN VALIDATION**", type="secondary", use_container_width=True):
-            with st.spinner("Running synthetic validation..."):
-                try:
-                    validation_report = st.session_state.model_validator.generate_validation_report(
-                        synthetic_test=True
-                    )
-                    st.success("✅ Validation completed!")
-                    
-                    with st.expander("📊 View Validation Results", expanded=False):
-                        st.json(validation_report)
-                        
-                except Exception as e:
-                    st.error(f"❌ Validation error: {str(e)}")
         
         st.markdown("---")
         
@@ -692,13 +651,13 @@ def main():
         • Neutral baseline xG
         • Pure Poisson probabilities
         • Bayesian shrinkage
-        • Full validation system
+        • xG integration (60/40)
         
         **Risk-Aware:**
         • Fractional Kelly staking
         • Edge-based decisions
         • Bankroll management
-        • Validation framework
+        • Confidence-based stakes
         """)
         
         st.markdown("---")
