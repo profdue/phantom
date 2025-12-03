@@ -1,5 +1,5 @@
 """
-PHANTOM v4.3 - Production Ready Core Models (UPDATED)
+PHANTOM v4.3 - Production Ready Core Models
 All mathematical errors fixed. Statistically rigorous.
 """
 import math
@@ -86,7 +86,6 @@ class LeagueAverages:
     """Container for league statistics calculated from data"""
     avg_home_goals: float        # Average goals by home teams
     avg_away_goals: float        # Average goals by away teams
-    league_avg_gpg: float        # League average per team per game
     total_matches: int
     actual_home_win_rate: float = 0.45
     actual_draw_rate: float = 0.25
@@ -96,6 +95,11 @@ class LeagueAverages:
     def neutral_baseline(self) -> float:
         """🔥 FIX 1: Neutral baseline for xG calculation"""
         return (self.avg_home_goals + self.avg_away_goals) / 2
+    
+    @property
+    def league_avg_gpg(self) -> float:
+        """League average per team per game - calculated property"""
+        return self.neutral_baseline
     
     @property
     def home_advantage_ratio(self) -> float:
@@ -334,46 +338,12 @@ class PoissonCalculator:
             away_win /= total
         
         return home_win, draw, away_win
-    
-    @staticmethod
-    def calculate_scoreline_probabilities(home_xg: float, away_xg: float, max_goals: int = 6) -> Dict[Tuple[int, int], float]:
-        """Calculate probability of each scoreline"""
-        probs = {}
-        
-        for i in range(max_goals + 1):
-            for j in range(max_goals + 1):
-                prob = (math.exp(-home_xg) * (home_xg ** i) / math.factorial(i) *
-                       math.exp(-away_xg) * (away_xg ** j) / math.factorial(j))
-                if prob > 0.0001:  # Only store significant probabilities
-                    probs[(i, j)] = prob
-        
-        return probs
 
 class BayesianShrinker:
     """🔥 FIX 4: Bayesian shrinkage instead of flattening"""
     
     def __init__(self, prior_strength: int = 10):
         self.prior_strength = prior_strength
-    
-    def apply_shrinkage(self, model_prob: float, sample_size: int, 
-                       prior_prob: float) -> float:
-        """
-        Apply Bayesian shrinkage:
-        posterior = (n * model_prob + k * prior_prob) / (n + k)
-        
-        where:
-        n = sample size (recent games)
-        k = prior strength (tuning parameter)
-        """
-        if sample_size <= 0:
-            return prior_prob
-        
-        shrinkage_factor = sample_size / (sample_size + self.prior_strength)
-        
-        # Apply shrinkage
-        posterior = (model_prob * sample_size + prior_prob * self.prior_strength) / (sample_size + self.prior_strength)
-        
-        return posterior
     
     def shrink_probabilities(self, home_win_prob: float, draw_prob: float,
                            away_win_prob: float, home_samples: int,
@@ -385,89 +355,13 @@ class BayesianShrinker:
         avg_samples = total_samples / 2
         
         # Apply shrinkage to each probability
-        home_shrunk = self.apply_shrinkage(
-            home_win_prob, avg_samples, league_priors['home_win']
-        )
-        draw_shrunk = self.apply_shrinkage(
-            draw_prob, avg_samples, league_priors['draw']
-        )
-        away_shrunk = self.apply_shrinkage(
-            away_win_prob, avg_samples, league_priors['away_win']
-        )
+        home_shrunk = (home_win_prob * avg_samples + league_priors['home_win'] * self.prior_strength) / (avg_samples + self.prior_strength)
+        draw_shrunk = (draw_prob * avg_samples + league_priors['draw'] * self.prior_strength) / (avg_samples + self.prior_strength)
+        away_shrunk = (away_win_prob * avg_samples + league_priors['away_win'] * self.prior_strength) / (avg_samples + self.prior_strength)
         
         # Renormalize
         total = home_shrunk + draw_shrunk + away_shrunk
         return home_shrunk/total, draw_shrunk/total, away_shrunk/total
-
-class ProbabilityCalibrator:
-    """Proper probability calibration with binning"""
-    
-    def __init__(self, n_bins: int = 10):
-        self.n_bins = n_bins
-        self.calibration_map = {}  # predicted_bin -> calibrated_prob
-        self.is_calibrated = False
-    
-    def fit(self, predicted_probs: List[float], actual_outcomes: List[int]):
-        """Fit calibration curve using isotonic regression (simplified)"""
-        if len(predicted_probs) < 100:
-            warnings.warn(f"Insufficient data for calibration: {len(predicted_probs)} samples")
-            return
-        
-        # Bin predictions
-        bins = np.linspace(0, 1, self.n_bins + 1)
-        bin_indices = np.digitize(predicted_probs, bins) - 1
-        
-        # Calculate actual win rate in each bin
-        for bin_idx in range(self.n_bins):
-            mask = bin_indices == bin_idx
-            if np.sum(mask) > 10:  # Minimum samples per bin
-                bin_probs = np.array(predicted_probs)[mask]
-                bin_outcomes = np.array(actual_outcomes)[mask]
-                
-                if len(bin_outcomes) > 0:
-                    actual_rate = np.mean(bin_outcomes)
-                    predicted_mid = (bins[bin_idx] + bins[bin_idx + 1]) / 2
-                    self.calibration_map[predicted_mid] = actual_rate
-        
-        self.is_calibrated = len(self.calibration_map) >= 3
-    
-    def calibrate(self, probability: float) -> float:
-        """Calibrate a single probability"""
-        if not self.is_calibrated or not self.calibration_map:
-            return probability
-        
-        # Find nearest calibration point
-        calibration_points = list(self.calibration_map.keys())
-        nearest_idx = np.argmin(np.abs(np.array(calibration_points) - probability))
-        
-        # Linearly interpolate if we have enough points
-        if len(calibration_points) >= 2:
-            if probability <= calibration_points[0]:
-                return self.calibration_map[calibration_points[0]]
-            elif probability >= calibration_points[-1]:
-                return self.calibration_map[calibration_points[-1]]
-            else:
-                # Find bounding points
-                for i in range(len(calibration_points) - 1):
-                    if calibration_points[i] <= probability <= calibration_points[i + 1]:
-                        # Linear interpolation
-                        x0, x1 = calibration_points[i], calibration_points[i + 1]
-                        y0, y1 = self.calibration_map[x0], self.calibration_map[x1]
-                        return y0 + (y1 - y0) * (probability - x0) / (x1 - x0)
-        
-        # Fallback: use nearest
-        return self.calibration_map[calibration_points[nearest_idx]]
-    
-    def calibrate_all(self, home_prob: float, draw_prob: float, 
-                     away_prob: float) -> Tuple[float, float, float]:
-        """Calibrate all three probabilities"""
-        home_calibrated = self.calibrate(home_prob)
-        draw_calibrated = self.calibrate(draw_prob)
-        away_calibrated = self.calibrate(away_prob)
-        
-        # Renormalize
-        total = home_calibrated + draw_calibrated + away_calibrated
-        return home_calibrated/total, draw_calibrated/total, away_calibrated/total
 
 class MatchPredictor:
     """Main prediction engine with ALL FIXES applied"""
@@ -486,7 +380,6 @@ class MatchPredictor:
         self.bayesian_shrinker = BayesianShrinker(
             prior_strength=self.league_config.get('prior_strength', 10)
         )
-        self.calibrator = ProbabilityCalibrator()
         
         # League priors for Bayesian shrinkage
         self.league_priors = {
@@ -632,15 +525,6 @@ class MatchPredictor:
             print(f"    Home={home_win_prob:.2%}, Draw={draw_prob:.2%}, Away={away_win_prob:.2%}")
             print(f"    Samples: Home={home_samples}, Away={away_samples}")
         
-        # Apply calibration if available
-        if self.calibrator.is_calibrated:
-            home_win_prob, draw_prob, away_win_prob = self.calibrator.calibrate_all(
-                home_win_prob, draw_prob, away_win_prob
-            )
-            if self.debug:
-                print(f"  After Calibration:")
-                print(f"    Home={home_win_prob:.2%}, Draw={draw_prob:.2%}, Away={away_win_prob:.2%}")
-        
         # Determine selection
         if home_win_prob >= away_win_prob and home_win_prob >= draw_prob:
             selection = "Home Win"
@@ -754,9 +638,3 @@ class MatchPredictor:
             "selection": selection,
             "confidence": round(confidence, 1)
         }
-    
-    def calibrate_model(self, predictions: List[float], outcomes: List[int]):
-        """Calibrate the model using historical data"""
-        self.calibrator.fit(predictions, outcomes)
-        if self.debug:
-            print(f"\n📈 MODEL CALIBRATED: {len(self.calibrator.calibration_map)} bins")
