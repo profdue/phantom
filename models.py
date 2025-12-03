@@ -1,5 +1,5 @@
 """
-PHANTOM v4.3 - Production Ready Core Models
+PHANTOM v4.3 - Production Ready Core Models (UPDATED)
 All mathematical errors fixed. Statistically rigorous.
 """
 import math
@@ -86,6 +86,7 @@ class LeagueAverages:
     """Container for league statistics calculated from data"""
     avg_home_goals: float        # Average goals by home teams
     avg_away_goals: float        # Average goals by away teams
+    league_avg_gpg: float        # League average per team per game
     total_matches: int
     actual_home_win_rate: float = 0.45
     actual_draw_rate: float = 0.25
@@ -737,68 +738,4 @@ class MatchPredictor:
         
         if btts_prob >= baseline:
             selection = "Yes"
-            confidence = min(80, btts_prob)
-        else:
-            selection = "No"
-            confidence = min(80, 100 - btts_prob)
-        
-        confidence = max(50, confidence)
-        
-        if self.debug:
-            print(f"  League Baseline: {baseline}%")
-            print(f"  Selection: {selection} ({confidence:.1f}%)")
-        
-        return {
-            "type": "BTTS",
-            "selection": selection,
-            "confidence": round(confidence, 1)
-        }
-    
-    def calibrate_model(self, predictions: List[float], outcomes: List[int]):
-        """Calibrate the model using historical data"""
-        self.calibrator.fit(predictions, outcomes)
-        if self.debug:
-            print(f"\n📈 MODEL CALIBRATED: {len(self.calibrator.calibration_map)} bins")
-
-class ModelValidator:
-    """Track model performance (simple version)"""
-    
-    def __init__(self):
-        self.predictions = []
-        self.confidence_bins = {}
-    
-    def add_prediction(self, prediction: Dict, actual_outcome: Dict = None):
-        """Store prediction for validation"""
-        import datetime
-        
-        entry = {
-            "timestamp": datetime.datetime.now(),
-            "prediction": prediction,
-            "actual": actual_outcome
-        }
-        self.predictions.append(entry)
-        
-        # Update confidence bins
-        for pred in prediction.get('predictions', []):
-            confidence = pred.get('confidence', 0)
-            bin_key = int(confidence // 5) * 5
-            if bin_key not in self.confidence_bins:
-                self.confidence_bins[bin_key] = {'total': 0, 'correct': 0}
-            
-            self.confidence_bins[bin_key]['total'] += 1
-            # Correctness would need actual outcome
-    
-    def get_calibration_report(self) -> Dict:
-        """Generate calibration report"""
-        report = {}
-        for bin_key, data in sorted(self.confidence_bins.items()):
-            if data['total'] > 0:
-                actual_rate = data['correct'] / data['total'] if 'correct' in data else None
-                predicted_rate = (bin_key + 2.5) / 100
-                report[f"{bin_key}-{bin_key+5}%"] = {
-                    'predicted': predicted_rate,
-                    'actual': actual_rate,
-                    'difference': actual_rate - predicted_rate if actual_rate else None,
-                    'samples': data['total']
-                }
-        return report
+            confidence = min(80
