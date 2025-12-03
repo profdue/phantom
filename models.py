@@ -1,31 +1,26 @@
 """
-PHANTOM v4.4 - ALL FIXES APPLIED (Except H2H)
-All mathematical errors fixed. Real football dynamics modeled.
+PHANTOM v4.4 - ALL FIXES APPLIED
+Extreme form recognition, style matrices, variance-aware predictions
 """
 import math
 import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Tuple, List, Optional, Any
-import warnings
-from collections import defaultdict
 
 # ============================================================================
-# LEAGUE CONFIGURATIONS (UPDATED WITH CORRECT THRESHOLDS)
+# LEAGUE CONFIGURATIONS (UPDATED)
 # ============================================================================
 
 LEAGUE_CONFIGS = {
     "premier_league": {
         "name": "Premier League",
-        "avg_goals": 2.93,  # Total goals per match
+        "avg_goals": 2.93,
         "over_threshold": 2.93,  # FIXED: At average, not below
-        "under_threshold": 2.60,  # Additional threshold for strong under
         "btts_baseline": 52,
-        "form_weight": 0.7,
         "home_advantage_multiplier": 1.18,
-        "prior_strength": 4,  # FIXED: Reduced from 10 to 4
-        "draw_baseline": 0.25,
-        "btts_correlation": 0.15,  # NEW: Correlation parameter
-        "goal_distribution": {  # NEW: Empirical distribution data
+        "prior_strength": 4,  # Reduced from 10
+        "btts_correlation": 0.15,
+        "goal_distribution": {
             2.0: 0.70,   # 70% Under when expected goals=2.0
             2.3: 0.60,
             2.6: 0.50,   # 50/50 at expected goals=2.6
@@ -38,12 +33,9 @@ LEAGUE_CONFIGS = {
         "name": "Serie A",
         "avg_goals": 2.56,
         "over_threshold": 2.56,
-        "under_threshold": 2.30,
         "btts_baseline": 48,
-        "form_weight": 0.7,
         "home_advantage_multiplier": 1.15,
         "prior_strength": 4,
-        "draw_baseline": 0.27,
         "btts_correlation": 0.12,
         "goal_distribution": {
             1.8: 0.75,
@@ -57,12 +49,9 @@ LEAGUE_CONFIGS = {
         "name": "La Liga",
         "avg_goals": 2.62,
         "over_threshold": 2.62,
-        "under_threshold": 2.35,
         "btts_baseline": 50,
-        "form_weight": 0.7,
         "home_advantage_multiplier": 1.20,
         "prior_strength": 4,
-        "draw_baseline": 0.26,
         "btts_correlation": 0.14,
         "goal_distribution": {
             1.9: 0.72,
@@ -76,12 +65,9 @@ LEAGUE_CONFIGS = {
         "name": "Bundesliga",
         "avg_goals": 3.14,
         "over_threshold": 3.14,
-        "under_threshold": 2.80,
         "btts_baseline": 55,
-        "form_weight": 0.7,
         "home_advantage_multiplier": 1.22,
         "prior_strength": 4,
-        "draw_baseline": 0.23,
         "btts_correlation": 0.18,
         "goal_distribution": {
             2.4: 0.65,
@@ -95,12 +81,9 @@ LEAGUE_CONFIGS = {
         "name": "Ligue 1",
         "avg_goals": 2.78,
         "over_threshold": 2.78,
-        "under_threshold": 2.50,
         "btts_baseline": 50,
-        "form_weight": 0.7,
         "home_advantage_multiplier": 1.16,
         "prior_strength": 4,
-        "draw_baseline": 0.25,
         "btts_correlation": 0.13,
         "goal_distribution": {
             2.1: 0.68,
@@ -114,12 +97,9 @@ LEAGUE_CONFIGS = {
         "name": "Russian Premier League",
         "avg_goals": 2.68,
         "over_threshold": 2.68,
-        "under_threshold": 2.40,
         "btts_baseline": 50,
-        "form_weight": 0.7,
         "home_advantage_multiplier": 1.17,
         "prior_strength": 4,
-        "draw_baseline": 0.26,
         "btts_correlation": 0.11,
         "goal_distribution": {
             2.0: 0.70,
@@ -143,7 +123,7 @@ GAME_CONTEXT_FACTORS = {
 
 @dataclass
 class LeagueAverages:
-    """Container for league statistics calculated from data"""
+    """Container for league statistics"""
     avg_home_goals: float
     avg_away_goals: float
     total_matches: int
@@ -153,23 +133,10 @@ class LeagueAverages:
     
     @property
     def neutral_baseline(self) -> float:
-        """Neutral baseline for xG calculation"""
         return (self.avg_home_goals + self.avg_away_goals) / 2
-    
-    @property
-    def league_avg_gpg(self) -> float:
-        """League average per team per game"""
-        return self.neutral_baseline
-    
-    @property
-    def home_advantage_ratio(self) -> float:
-        """Actual home advantage from data"""
-        if self.avg_away_goals > 0:
-            return self.avg_home_goals / self.avg_away_goals
-        return 1.18
 
 class TeamProfile:
-    """Team profile with ALL fixes applied - NO form double-counting"""
+    """Team profile with all fixes"""
     
     def __init__(self, data_dict: Dict, is_home: bool = True, 
                  league_averages: Optional[LeagueAverages] = None,
@@ -179,7 +146,7 @@ class TeamProfile:
         self.league_averages = league_averages
         self.debug = debug
         
-        # Extract basic stats
+        # Basic stats
         self.matches = int(data_dict['Matches'])
         self.wins = int(data_dict['Wins'])
         self.draws = int(data_dict['Draws'])
@@ -198,17 +165,14 @@ class TeamProfile:
         self.xg_pg = self.xg / max(1, self.matches)
         self.xga_pg = self.xga / max(1, self.matches)
         
-        # Last 5 form data (expanded for momentum weighting)
+        # Last 5 form data
         self._extract_last5_data(data_dict)
         
-        # Individual game results for variance calculation
-        self._extract_game_by_game_data(data_dict)
-        
-        # Calculate recent games played
+        # Calculate recent games
         self.recent_games_played = min(5, 
             self.last5_wins + self.last5_draws + self.last5_losses)
         
-        # FIX: Calculate ALL metrics in ONE place, no double counting
+        # Calculate all metrics
         self._calculate_all_metrics()
         
         if self.debug:
@@ -231,49 +195,37 @@ class TeamProfile:
             self.last5_ga = int(data_dict.get('Last5_Away_GA', 0))
             self.last5_pts = int(data_dict.get('Last5_Away_PTS', 0))
         
-        # Store individual results for momentum weighting
-        self.last5_results = []  # Will be populated if available
-    
-    def _extract_game_by_game_data(self, data_dict: Dict):
-        """Extract game-by-game data for variance calculation"""
-        # This would ideally come from a richer dataset
-        # For now, simulate from aggregates
+        # For variance calculation
         self.recent_goals_scored = []
         self.recent_goals_conceded = []
         
-        # Distribute goals across last 5 games
-        total_games = self.recent_games_played
-        if total_games > 0:
-            avg_scored = self.last5_gf / total_games
-            avg_conceded = self.last5_ga / total_games
+        if self.recent_games_played > 0:
+            avg_scored = self.last5_gf / self.recent_games_played
+            avg_conceded = self.last5_ga / self.recent_games_played
             
-            # Create realistic distribution
-            for i in range(total_games):
-                # Add some randomness
-                scored = max(0, int(round(avg_scored + np.random.normal(0, 0.3))))
-                conceded = max(0, int(round(avg_conceded + np.random.normal(0, 0.3))))
-                self.recent_goals_scored.append(scored)
-                self.recent_goals_conceded.append(conceded)
+            # Simulate distribution
+            for i in range(self.recent_games_played):
+                self.recent_goals_scored.append(max(0, int(round(avg_scored))))
+                self.recent_goals_conceded.append(max(0, int(round(avg_conceded))))
     
     def _calculate_all_metrics(self):
-        """FIX: Calculate ALL metrics in ONE place to avoid double-counting"""
-        
-        # 1. Calculate momentum-weighted form (exponential decay)
+        """Calculate all metrics in one place"""
+        # 1. Form score with momentum weighting
         self.form_score = self._calculate_momentum_form()
         
-        # 2. Calculate attack strength WITH form included (once)
-        self.attack_strength = self._calculate_attack_strength_single_pass()
+        # 2. Attack strength with form included
+        self.attack_strength = self._calculate_attack_strength()
         
-        # 3. Calculate defense strength WITH form included (once)
-        self.defense_strength = self._calculate_defense_strength_single_pass()
+        # 3. Defense strength with form included
+        self.defense_strength = self._calculate_defense_strength()
         
-        # 4. Calculate BTTS tendency with correlation awareness
-        self.btts_tendency = self._calculate_btts_tendency_fixed()
+        # 4. BTTS tendency
+        self.btts_tendency = self._calculate_btts_tendency()
         
-        # 5. Calculate team variance factor (for negative binomial adjustment)
+        # 5. Variance factor
         self.variance_factor = self._calculate_variance_factor()
         
-        # 6. Game context (default for now)
+        # 6. Game context (default)
         self.context_factor = GAME_CONTEXT_FACTORS['default']
     
     def _calculate_momentum_form(self) -> float:
@@ -282,56 +234,49 @@ class TeamProfile:
             season_form = self.points / (self.matches * 3)
             return season_form * 0.7
         
-        # Exponential decay weights: most recent = heaviest
-        weights = [0.35, 0.25, 0.20, 0.15, 0.05]  # Sum to 1.0
+        # Exponential decay weights
+        weights = [0.35, 0.25, 0.20, 0.15, 0.05]
         
-        # Calculate weighted points from last 5
+        # Calculate weighted points
         total_weighted_points = 0
         total_possible = 0
         
-        # Simulate results based on W/D/L counts
+        # Simulate results
         results = []
         for _ in range(self.last5_wins):
-            results.append(3)  # Win = 3 points
+            results.append(3)
         for _ in range(self.last5_draws):
-            results.append(1)  # Draw = 1 point
+            results.append(1)
         for _ in range(self.last5_losses):
-            results.append(0)  # Loss = 0 points
+            results.append(0)
         
-        # Pad with season average if fewer than 5 games
         while len(results) < 5:
             results.append(self.points / max(1, self.matches))
         
-        # Apply weights (most recent first)
-        for i, points in enumerate(results[:5]):  # Take up to 5
+        for i, points in enumerate(results[:5]):
             weight = weights[i] if i < len(weights) else 0.05
             total_weighted_points += points * weight
             total_possible += 3 * weight
         
         weighted_form = total_weighted_points / max(0.01, total_possible)
         
-        # Blend with season form for stability
+        # Blend with season form
         season_form = self.points / (self.matches * 3)
-        
-        # More weight to momentum if we have recent games
         momentum_weight = min(0.8, self.recent_games_played / 5 * 0.8)
         season_weight = 1 - momentum_weight
         
         return (weighted_form * momentum_weight) + (season_form * season_weight)
     
-    def _calculate_attack_strength_single_pass(self) -> float:
-        """FIX: Attack strength with form integrated ONCE, no double-counting"""
-        
-        # Base from full season (goals + xG blend)
-        season_goals_contribution = self.goals_pg * 0.4
-        season_xg_contribution = self.xg_pg * 0.6
-        season_attack = season_goals_contribution + season_xg_contribution
+    def _calculate_attack_strength(self) -> float:
+        """Attack strength with form included once"""
+        # Base from full season
+        season_attack = self.goals_pg * 0.4 + self.xg_pg * 0.6
         
         # Recent performance
         recent_gpg = self.last5_gf / max(1, self.recent_games_played)
-        recent_xg_pg = self.xg / max(1, self.matches)  # Use season xG for stability
+        recent_xg_pg = self.xg / max(1, self.matches)
         
-        # Calculate form factor: how much better/worse recently
+        # Form factor
         recent_total = (recent_gpg * 0.4) + (recent_xg_pg * 0.6)
         season_total = season_attack
         
@@ -340,10 +285,11 @@ class TeamProfile:
         else:
             form_factor = 1.0
         
-        # Apply form factor (capped)
         form_factor = min(1.4, max(0.6, form_factor))
-        
         final_attack = season_attack * form_factor
+        
+        # Apply variance factor
+        final_attack *= self.variance_factor
         
         # Compare to league baseline
         if self.is_home:
@@ -351,28 +297,19 @@ class TeamProfile:
         else:
             baseline = self.league_averages.avg_away_goals if self.league_averages else 1.28
         
-        # Calculate relative strength
         strength = final_attack / max(0.3, baseline)
-        
-        # Apply variance factor (teams that score in bunches)
-        strength *= self.variance_factor
-        
-        # Reasonable bounds
         return min(1.9, max(0.5, strength))
     
-    def _calculate_defense_strength_single_pass(self) -> float:
-        """FIX: Defense strength with form integrated ONCE"""
-        
+    def _calculate_defense_strength(self) -> float:
+        """Defense strength with form included once"""
         # Base from full season
-        season_goals_against = self.goals_against_pg * 0.4
-        season_xga = self.xga_pg * 0.6
-        season_defense = season_goals_against + season_xga
+        season_defense = self.goals_against_pg * 0.4 + self.xga_pg * 0.6
         
         # Recent performance
         recent_gapg = self.last5_ga / max(1, self.recent_games_played)
         recent_xga_pg = self.xga / max(1, self.matches)
         
-        # Calculate form factor
+        # Form factor (inverted for defense)
         recent_total = (recent_gapg * 0.4) + (recent_xga_pg * 0.6)
         season_total = season_defense
         
@@ -381,69 +318,56 @@ class TeamProfile:
         else:
             form_factor = 1.0
         
-        # Invert for defense: worse recent form = lower strength
-        # If conceding more recently (form_factor > 1), defense is worse
         defense_form_factor = 1.0 / max(0.7, min(1.3, form_factor))
-        
         final_defense = season_defense * defense_form_factor
+        
+        # Apply variance factor (hurts defense)
+        final_defense *= self.variance_factor
         
         # What opponents typically score
         if self.is_home:
-            # Home defense faces away attacks
             opponent_baseline = self.league_averages.avg_away_goals if self.league_averages else 1.28
         else:
-            # Away defense faces home attacks
             opponent_baseline = self.league_averages.avg_home_goals if self.league_averages else 1.65
         
-        # Defense strength = opponent average / actual conceded
-        # Higher = better defense
         strength = opponent_baseline / max(0.3, final_defense)
-        
-        # Apply variance factor (teams that concede in bunches)
-        strength /= self.variance_factor  # High variance hurts defense
-        
         return min(1.6, max(0.5, strength))
     
-    def _calculate_btts_tendency_fixed(self) -> float:
-        """FIXED BTTS tendency using correlation-aware model"""
+    def _calculate_btts_tendency(self) -> float:
+        """BTTS tendency"""
         if self.recent_games_played == 0:
             return 1.0
         
-        # Goals per game recently
         goals_per_game = self.last5_gf / max(1, self.recent_games_played)
         goals_against_per_game = self.last5_ga / max(1, self.recent_games_played)
         
-        # Probability of scoring and conceding
         p_scored = 1 - math.exp(-goals_per_game)
         p_conceded = 1 - math.exp(-goals_against_per_game)
         
-        # Expected games where team is involved in BTTS
-        # Using correlation-aware formula
+        # Expected games involved in BTTS
         expected_involved = self.recent_games_played * (p_scored + p_conceded - p_scored * p_conceded)
-        
-        # Normalize to per-game basis
         involvement_rate = expected_involved / self.recent_games_played
         
         # Map to tendency factor
         if involvement_rate >= 0.85:
-            return 1.25  # Very high BTTS involvement
+            return 1.25
         elif involvement_rate >= 0.75:
-            return 1.15  # High BTTS involvement
+            return 1.15
         elif involvement_rate >= 0.65:
-            return 1.05  # Above average
+            return 1.05
         elif involvement_rate <= 0.45:
-            return 0.75  # Low BTTS involvement
+            return 0.75
         elif involvement_rate <= 0.55:
-            return 0.85  # Below average
+            return 0.85
         
         return 1.0
     
     def _calculate_variance_factor(self) -> float:
-        """Calculate if team is high-variance (scores/concedes in bunches)"""
+        """Calculate team variance"""
         if len(self.recent_goals_scored) < 3:
             return 1.0
         
-        # Calculate variance-to-mean ratio for scoring
+        # Calculate variance-to-mean ratio
         goals_scored = self.recent_goals_scored
         mean_scored = sum(goals_scored) / len(goals_scored)
         
@@ -453,7 +377,6 @@ class TeamProfile:
         else:
             ratio_scored = 1.0
         
-        # Calculate for conceding
         goals_conceded = self.recent_goals_conceded
         mean_conceded = sum(goals_conceded) / len(goals_conceded)
         
@@ -463,38 +386,29 @@ class TeamProfile:
         else:
             ratio_conceded = 1.0
         
-        # Average the ratios
         avg_ratio = (ratio_scored + ratio_conceded) / 2
         
         # Map to variance factor
-        # Poisson has ratio = 1.0
-        # >1.3 means overdispersed (negative binomial territory)
-        # <0.7 means underdispersed (more consistent)
-        
         if avg_ratio > 1.5:
-            return 1.25  # Very high variance
+            return 1.25
         elif avg_ratio > 1.3:
-            return 1.15  # High variance
+            return 1.15
         elif avg_ratio > 1.1:
-            return 1.05  # Slightly high variance
+            return 1.05
         elif avg_ratio < 0.6:
-            return 0.8   # Very consistent
+            return 0.8
         elif avg_ratio < 0.8:
-            return 0.9   # Consistent
+            return 0.9
         
         return 1.0
     
     def _debug_info(self):
         """Debug output"""
-        print(f"\n🔍 {self.name} ({'Home' if self.is_home else 'Away'}):")
-        print(f"  Form: {self.form_score:.2f}")
-        print(f"  Attack: {self.attack_strength:.2f}")
-        print(f"  Defense: {self.defense_strength:.2f}")
-        print(f"  BTTS Tendency: {self.btts_tendency:.2f}")
-        print(f"  Variance Factor: {self.variance_factor:.2f}")
+        print(f"  {self.name}: Form={self.form_score:.2f}, Attack={self.attack_strength:.2f}, "
+              f"Defense={self.defense_strength:.2f}, Variance={self.variance_factor:.2f}")
 
 class PoissonCalculator:
-    """Poisson probability calculator with variance adjustment"""
+    """Poisson probability calculator"""
     
     @staticmethod
     def calculate_poisson_probabilities(home_xg: float, away_xg: float, 
@@ -503,8 +417,7 @@ class PoissonCalculator:
                                       max_goals: int = 6) -> Tuple[float, float, float]:
         """Poisson probabilities with variance adjustment"""
         
-        # Adjust xG based on variance factors
-        # High variance teams: xG becomes less predictive, spread outcomes more
+        # Adjust xG based on variance
         adjusted_home_xg = home_xg * (1 + (home_variance - 1.0) * 0.1)
         adjusted_away_xg = away_xg * (1 + (away_variance - 1.0) * 0.1)
         
@@ -531,9 +444,8 @@ class PoissonCalculator:
                 else:
                     draw += prob
         
-        # Validate probabilities sum to ~1.0
+        # Normalize if needed
         total = home_win + draw + away_win
-        
         if abs(total - 1.0) > 0.001:
             home_win /= total
             draw /= total
@@ -542,26 +454,30 @@ class PoissonCalculator:
         return home_win, draw, away_win
 
 class BayesianShrinker:
-    """FIXED: Bayesian shrinkage with dynamic prior strength"""
+    """Bayesian shrinkage that respects extremes"""
     
     def __init__(self, base_prior_strength: int = 4):
         self.base_prior_strength = base_prior_strength
     
     def shrink_probabilities(self, home_win_prob: float, draw_prob: float,
-                           away_win_prob: float, home_samples: int,
-                           away_samples: int, league_priors: Dict) -> Tuple[float, float, float]:
-        """Dynamic shrinkage based on sample size"""
-        
-        # Calculate effective sample size
+                           away_win_prob: float, home: TeamProfile,
+                           away: TeamProfile, league_priors: Dict) -> Tuple[float, float, float]:
+        """Dynamic shrinkage based on extremity"""
+        home_samples = home.recent_games_played
+        away_samples = away.recent_games_played
         avg_samples = (home_samples + away_samples) / 2
         
-        # Dynamic prior strength: less smoothing when we have more data
-        if avg_samples >= 8:
+        # Check for extreme cases
+        home_form = home.form_score
+        away_form = away.form_score
+        
+        # Extreme teams get less shrinkage
+        if home_form > 0.8 or away_form < 0.2:
             prior_strength = 2  # Minimal smoothing
-        elif avg_samples >= 5:
-            prior_strength = 3  # Moderate smoothing
+        elif home_form > 0.7 or away_form < 0.3:
+            prior_strength = 3  # Reduced smoothing
         else:
-            prior_strength = self.base_prior_strength  # Default
+            prior_strength = self.base_prior_strength
         
         # Apply shrinkage
         home_shrunk = (home_win_prob * avg_samples + league_priors['home_win'] * prior_strength) / (avg_samples + prior_strength)
@@ -573,7 +489,7 @@ class BayesianShrinker:
         return home_shrunk/total, draw_shrunk/total, away_shrunk/total
 
 class MatchPredictor:
-    """Main prediction engine with ALL FIXES applied"""
+    """Main prediction engine with ALL fixes"""
     
     def __init__(self, league_name: str, league_averages: LeagueAverages, 
                  debug: bool = False):
@@ -590,7 +506,7 @@ class MatchPredictor:
             base_prior_strength=self.league_config.get('prior_strength', 4)
         )
         
-        # League priors for Bayesian shrinkage
+        # League priors
         self.league_priors = {
             'home_win': league_averages.actual_home_win_rate,
             'draw': league_averages.actual_draw_rate,
@@ -598,36 +514,26 @@ class MatchPredictor:
         }
         
         if self.debug:
-            print(f"\n🎯 PREDICTOR INITIALIZED FOR {league_name.upper()}")
-            print(f"  Neutral Baseline: {league_averages.neutral_baseline:.2f}")
-            print(f"  Home Advantage: {self.league_config['home_advantage_multiplier']:.2f}x")
-            print(f"  Bayesian Prior Strength: Dynamic")
-            print(f"  BTTS Correlation: {self.league_config.get('btts_correlation', 0.15):.2f}")
+            print(f"\n🎯 PREDICTOR INITIALIZED FOR {self.league_config['name'].upper()}")
     
     def predict(self, home_team: TeamProfile, away_team: TeamProfile, 
                 game_context: str = "default") -> Dict:
-        """Make predictions with ALL FIXES applied"""
+        """Make predictions with ALL fixes"""
         
         if self.debug:
             print(f"\n🔮 PREDICTING: {home_team.name} vs {away_team.name}")
-            print(f"  Game Context: {game_context}")
         
-        # Apply game context factor
+        # Apply game context
         context_factor = GAME_CONTEXT_FACTORS.get(game_context, 1.0)
-        home_team.context_factor = context_factor
-        away_team.context_factor = context_factor
         
-        # 1. Calculate expected goals (NO form double-counting)
+        # Calculate expected goals
         home_xg, away_xg = self._calculate_expected_goals(home_team, away_team)
+        home_xg *= context_factor
+        away_xg *= context_factor
         
-        # 2. Calculate pure Poisson probabilities with variance adjustment
+        # Make predictions
         winner_pred = self._predict_winner_poisson(home_xg, away_xg, home_team, away_team)
-        
-        # 3. Total goals prediction using empirical distribution
-        total_xg = home_xg + away_xg
-        total_pred = self._predict_total_goals_empirical(total_xg, home_team, away_team)
-        
-        # 4. BTTS prediction with correlation
+        total_pred = self._predict_total_goals_fixed(home_xg, away_xg, home_team, away_team)
         btts_pred = self._predict_btts_with_correlation(home_xg, away_xg, home_team, away_team)
         
         return {
@@ -636,121 +542,142 @@ class MatchPredictor:
                 "expected_goals": {
                     "home": round(home_xg, 2),
                     "away": round(away_xg, 2),
-                    "total": round(total_xg, 2)
+                    "total": round(home_xg + away_xg, 2)
                 },
                 "form_scores": {
                     "home": round(home_team.form_score, 2),
                     "away": round(away_team.form_score, 2)
-                },
-                "attack_strengths": {
-                    "home": round(home_team.attack_strength, 2),
-                    "away": round(away_team.attack_strength, 2)
-                },
-                "defense_strengths": {
-                    "home": round(home_team.defense_strength, 2),
-                    "away": round(away_team.defense_strength, 2)
-                },
-                "variance_factors": {
-                    "home": round(home_team.variance_factor, 2),
-                    "away": round(away_team.variance_factor, 2)
-                },
-                "context_factor": context_factor
+                }
             },
             "predictions": [winner_pred, total_pred, btts_pred]
         }
     
     def _calculate_expected_goals(self, home: TeamProfile, away: TeamProfile) -> Tuple[float, float]:
-        """FIXED: xG calculation with NO double-counting"""
-        
-        # Use NEUTRAL baseline
+        """Calculate expected goals"""
         neutral_baseline = self.league_averages.neutral_baseline
-        
-        # Get home advantage from config
         home_advantage = self.league_config['home_advantage_multiplier']
         
-        if self.debug:
-            print(f"\n📊 EXPECTED GOALS CALCULATION:")
-            print(f"  Neutral Baseline: {neutral_baseline:.2f}")
-            print(f"  Home Advantage: {home_advantage:.2f}x")
-            print(f"  Context Factor: {home.context_factor:.2f}")
-        
-        # Base xG from neutral baseline
-        # Note: Form is already IN attack/defense strengths
+        # Base xG
         home_base_xg = neutral_baseline * home.attack_strength / max(0.6, away.defense_strength)
         away_base_xg = neutral_baseline * away.attack_strength / max(0.6, home.defense_strength)
         
         # Apply home advantage
         home_xg = home_base_xg * home_advantage
         
-        # Apply game context factor
-        home_xg *= home.context_factor
-        away_xg = away_base_xg * away.context_factor
-        
-        # Apply conservative momentum adjustment (separate from form in attack/defense)
-        home_xg, away_xg = self._apply_momentum_adjustment(home_xg, home, away_xg, away)
+        # Apply momentum adjustment
+        home_xg, away_xg = self._apply_momentum_adjustment(home_xg, home, away_base_xg, away)
         
         # Realistic caps
         home_xg = min(4.0, max(0.2, home_xg))
         away_xg = min(3.5, max(0.2, away_xg))
         
-        if self.debug:
-            print(f"  Base xG: Home={home_base_xg:.2f}, Away={away_base_xg:.2f}")
-            print(f"  After Adjustments: Home={home_xg:.2f}, Away={away_xg:.2f}")
-            print(f"  Total xG: {home_xg + away_xg:.2f}")
-        
         return home_xg, away_xg
     
     def _apply_momentum_adjustment(self, home_xg, home, away_xg, away):
-        """Apply momentum adjustment (NOT form - that's already in attack/defense)"""
-        
-        # Momentum: extreme recent performance beyond seasonal form
-        home_momentum = home.form_score  # Already calculated with exponential decay
+        """Apply momentum adjustment"""
+        home_momentum = home.form_score
         away_momentum = away.form_score
         
-        # Only adjust if momentum is extreme
-        momentum_threshold = 0.7  # 30% above/below average
+        momentum_threshold = 0.7
         
         if home_momentum > 1.0 + momentum_threshold:
-            # Hot streak
-            boost = 1.0 + (home_momentum - 1.0) * 0.1  # Max 10% boost
+            boost = 1.0 + (home_momentum - 1.0) * 0.1
             home_xg *= min(1.1, boost)
-            if self.debug:
-                print(f"  Home Momentum Boost: {home_momentum:.2f} → x{min(1.1, boost):.3f}")
         
         if away_momentum > 1.0 + momentum_threshold:
             boost = 1.0 + (away_momentum - 1.0) * 0.1
             away_xg *= min(1.1, boost)
-            if self.debug:
-                print(f"  Away Momentum Boost: {away_momentum:.2f} → x{min(1.1, boost):.3f}")
         
         return home_xg, away_xg
     
+    def _apply_extreme_form_boosts(self, home_win_prob: float, draw_prob: float, away_win_prob: float,
+                                 home: TeamProfile, away: TeamProfile) -> Tuple[float, float, float]:
+        """Apply extreme form multipliers"""
+        home_win_rate = home.wins / max(1, home.matches) if home.is_home else 0
+        away_win_rate = away.wins / max(1, away.matches) if not away.is_home else 0
+        
+        home_multiplier = 1.0
+        
+        # Rule 1: Extreme home dominance (Barcelona rule)
+        if home_win_rate >= 0.85:
+            home_multiplier *= 1.3
+            if self.debug:
+                print(f"  EXTREME HOME FORM: {home.name} ({home_win_rate:.0%} win rate) → ×1.3")
+        
+        # Rule 2: Extreme away weakness (Wolves rule)
+        if away_win_rate <= 0.15:
+            home_multiplier *= 1.2
+            if self.debug:
+                print(f"  EXTREME AWAY WEAKNESS: {away.name} ({away_win_rate:.0%} win rate away) → ×1.2")
+        
+        # Rule 3: Goal differential mismatch
+        home_gd_per_game = (home.goals_for - home.goals_against) / max(1, home.matches)
+        away_gd_per_game = (away.goals_for - away.goals_against) / max(1, away.matches)
+        
+        if home_gd_per_game > 1.0 and away_gd_per_game < -0.5:
+            home_multiplier *= 1.25
+            if self.debug:
+                print(f"  GOAL DIFFERENTIAL MISMATCH: Home +{home_gd_per_game:.1f}/gm, Away {away_gd_per_game:.1f}/gm → ×1.25")
+        
+        # Apply multiplier
+        if home_multiplier > 1.0:
+            home_win_prob *= home_multiplier
+            total = home_win_prob + draw_prob + away_win_prob
+            home_win_prob /= total
+            draw_prob /= total
+            away_win_prob /= total
+        
+        return home_win_prob, draw_prob, away_win_prob
+    
+    def _apply_league_position_adjustment(self, home_win_prob: float, draw_prob: float, away_win_prob: float,
+                                        home: TeamProfile, away: TeamProfile) -> Tuple[float, float, float]:
+        """Adjust for league position gaps"""
+        points_per_game_home = home.points / max(1, home.matches)
+        points_per_game_away = away.points / max(1, away.matches)
+        
+        ppg_diff = points_per_game_home - points_per_game_away
+        
+        if ppg_diff >= 1.8:  # Equivalent to 6+ positions
+            boost = 1.18
+            home_win_prob *= boost
+            
+            if self.debug:
+                print(f"  LEAGUE POSITION GAP: {ppg_diff:.2f} PPG diff → ×{boost:.2f}")
+            
+            total = home_win_prob + draw_prob + away_win_prob
+            home_win_prob /= total
+            draw_prob /= total
+            away_win_prob /= total
+        
+        return home_win_prob, draw_prob, away_win_prob
+    
     def _predict_winner_poisson(self, home_xg: float, away_xg: float,
                               home: TeamProfile, away: TeamProfile) -> Dict:
-        """Poisson winner prediction with variance adjustment"""
+        """Fixed winner prediction with all adjustments"""
         
-        # Calculate probabilities with variance factors
+        # 1. Base Poisson probabilities
         home_win_prob, draw_prob, away_win_prob = self.poisson_calc.calculate_poisson_probabilities(
             home_xg, away_xg, home.variance_factor, away.variance_factor
         )
         
         if self.debug:
-            print(f"\n🎲 POISSON PROBABILITIES (with variance):")
-            print(f"  Raw: Home={home_win_prob:.2%}, Draw={draw_prob:.2%}, Away={away_win_prob:.2%}")
-            print(f"  Variance Factors: Home={home.variance_factor:.2f}, Away={away.variance_factor:.2f}")
+            print(f"\n🎲 MATCH WINNER CALCULATION:")
+            print(f"  Base Poisson: Home={home_win_prob:.2%}, Draw={draw_prob:.2%}, Away={away_win_prob:.2%}")
         
-        # Apply Bayesian shrinkage
-        home_samples = home.recent_games_played
-        away_samples = away.recent_games_played
-        
-        home_win_prob, draw_prob, away_win_prob = self.bayesian_shrinker.shrink_probabilities(
-            home_win_prob, draw_prob, away_win_prob,
-            home_samples, away_samples, self.league_priors
+        # 2. Apply extreme form boosts
+        home_win_prob, draw_prob, away_win_prob = self._apply_extreme_form_boosts(
+            home_win_prob, draw_prob, away_win_prob, home, away
         )
         
-        if self.debug:
-            print(f"  After Bayesian Shrinkage:")
-            print(f"    Home={home_win_prob:.2%}, Draw={draw_prob:.2%}, Away={away_win_prob:.2%}")
+        # 3. Apply league position adjustment
+        home_win_prob, draw_prob, away_win_prob = self._apply_league_position_adjustment(
+            home_win_prob, draw_prob, away_win_prob, home, away
+        )
+        
+        # 4. Apply Bayesian shrinkage
+        home_win_prob, draw_prob, away_win_prob = self.bayesian_shrinker.shrink_probabilities(
+            home_win_prob, draw_prob, away_win_prob, home, away, self.league_priors
+        )
         
         # Determine selection
         if home_win_prob >= away_win_prob and home_win_prob >= draw_prob:
@@ -763,11 +690,11 @@ class MatchPredictor:
             selection = "Draw"
             confidence = draw_prob * 100
         
-        # Apply bounds
+        # Realistic bounds
         confidence = max(15, min(85, confidence))
         
         if self.debug:
-            print(f"  Selection: {selection} ({confidence:.1f}%)")
+            print(f"  Final: {selection} ({confidence:.1f}%)")
         
         return {
             "type": "Match Winner",
@@ -780,42 +707,154 @@ class MatchPredictor:
             }
         }
     
-    def _predict_total_goals_empirical(self, total_xg: float, home: TeamProfile, away: TeamProfile) -> Dict:
-        """Predict Over/Under using empirical distribution data"""
+    def _classify_team_style(self, team: TeamProfile) -> str:
+        """Simple style classification"""
+        league_avg_goals = self.league_averages.neutral_baseline
         
-        league_avg = self.league_config['avg_goals']
-        goal_dist = self.league_config.get('goal_distribution', {})
+        if team.goals_pg > league_avg_goals + 0.3:
+            return "ATTACKING"
+        elif team.goals_against_pg < league_avg_goals - 0.3:
+            return "DEFENSIVE"
+        else:
+            return "NEUTRAL"
+    
+    def _apply_style_adjustment(self, total_xg: float, home: TeamProfile, away: TeamProfile) -> float:
+        """Adjust total goals based on team styles"""
+        home_style = self._classify_team_style(home)
+        away_style = self._classify_team_style(away)
+        
+        adjustment = 0.0
+        
+        if home_style == "ATTACKING" and away_style == "ATTACKING":
+            adjustment = 0.4
+            if self.debug:
+                print(f"  STYLE: ATTACKING vs ATTACKING → +{adjustment:.1f} goals")
+        
+        elif home_style == "DEFENSIVE" and away_style == "DEFENSIVE":
+            adjustment = -0.4
+            if self.debug:
+                print(f"  STYLE: DEFENSIVE vs DEFENSIVE → {adjustment:.1f} goals")
+        
+        return total_xg + adjustment
+    
+    def _apply_goal_flow_adjustment(self, total_xg: float, home: TeamProfile, away: TeamProfile) -> float:
+        """Adjust for recent goal involvement"""
+        home_involvement = (home.last5_gf + home.last5_ga) / max(1, home.recent_games_played)
+        away_involvement = (away.last5_gf + away.last5_ga) / max(1, away.recent_games_played)
+        
+        if home_involvement > 3.0 and away_involvement > 3.0:
+            adjustment = 0.3
+            if self.debug:
+                print(f"  GOAL FLOW: High involvement (Home {home_involvement:.1f}, Away {away_involvement:.1f}) → +{adjustment:.1f} goals")
+            return total_xg + adjustment
+        
+        elif home_involvement < 1.5 and away_involvement < 1.5:
+            adjustment = -0.3
+            if self.debug:
+                print(f"  GOAL FLOW: Low involvement (Home {home_involvement:.1f}, Away {away_involvement:.1f}) → {adjustment:.1f} goals")
+            return total_xg + adjustment
+        
+        return total_xg
+    
+    def _get_dynamic_threshold(self, home: TeamProfile, away: TeamProfile) -> float:
+        """Get dynamic Over/Under threshold"""
+        base_threshold = self.league_config['over_threshold']
+        avg_variance = (home.variance_factor + away.variance_factor) / 2
+        
+        if avg_variance > 1.2:
+            adjusted_threshold = base_threshold - 0.2
+            if self.debug:
+                print(f"  VARIANCE ADJUSTMENT: High variance ({avg_variance:.2f}) → threshold {adjusted_threshold:.2f}")
+            return adjusted_threshold
+        
+        elif avg_variance < 0.9:
+            adjusted_threshold = base_threshold + 0.1
+            if self.debug:
+                print(f"  VARIANCE ADJUSTMENT: Low variance ({avg_variance:.2f}) → threshold {adjusted_threshold:.2f}")
+            return adjusted_threshold
+        
+        return base_threshold
+    
+    def _interpolate_probability(self, total_xg: float, distribution: Dict) -> float:
+        """Interpolate probability from distribution table"""
+        if not distribution:
+            return 0.5
+        
+        points = sorted(distribution.items())
+        
+        if total_xg <= points[0][0]:
+            return points[0][1]
+        
+        if total_xg >= points[-1][0]:
+            return points[-1][1]
+        
+        for i in range(len(points) - 1):
+            x1, y1 = points[i]
+            x2, y2 = points[i + 1]
+            
+            if x1 <= total_xg <= x2:
+                fraction = (total_xg - x1) / (x2 - x1)
+                return y1 + fraction * (y2 - y1)
+        
+        return 0.5
+    
+    def _predict_total_goals_fixed(self, home_xg: float, away_xg: float,
+                                 home: TeamProfile, away: TeamProfile) -> Dict:
+        """Fixed total goals prediction with all adjustments"""
+        
+        total_xg = home_xg + away_xg
         
         if self.debug:
-            print(f"\n⚽ TOTAL GOALS (Empirical):")
-            print(f"  xG Total: {total_xg:.2f}")
-            print(f"  League Avg: {league_avg:.2f}")
+            print(f"\n⚽ TOTAL GOALS CALCULATION:")
+            print(f"  Base xG Total: {total_xg:.2f}")
         
-        # Get probability of Under 2.5 from distribution table
-        p_under = self._interpolate_probability(total_xg, goal_dist)
+        # 1. Apply style adjustment
+        total_xg = self._apply_style_adjustment(total_xg, home, away)
         
-        # Adjust for team variance
-        # High variance teams → more uncertainty → push toward 50%
-        avg_variance = (home.variance_factor + away.variance_factor) / 2
-        if avg_variance > 1.1:
-            # High variance: reduce confidence
-            adjustment = (avg_variance - 1.0) * 0.5
-            p_under = 0.5 + (p_under - 0.5) * (1 - adjustment)
+        # 2. Apply goal flow adjustment
+        total_xg = self._apply_goal_flow_adjustment(total_xg, home, away)
         
-        # Decision
-        if p_under < 0.5:
-            selection = "Over 2.5 Goals"
-            confidence = (1 - p_under) * 100
+        # 3. Get dynamic threshold
+        threshold = self._get_dynamic_threshold(home, away)
+        
+        if self.debug:
+            print(f"  Adjusted Total: {total_xg:.2f}")
+            print(f"  Dynamic Threshold: {threshold:.2f}")
+        
+        # 4. Decision
+        goal_dist = self.league_config.get('goal_distribution', {})
+        
+        if goal_dist:
+            # Use empirical distribution
+            p_under = self._interpolate_probability(total_xg, goal_dist)
+            
+            # Adjust for variance
+            avg_variance = (home.variance_factor + away.variance_factor) / 2
+            if avg_variance > 1.1:
+                p_under = 0.5 + (p_under - 0.5) * 0.8
+            
+            if p_under < 0.5:
+                selection = "Over 2.5 Goals"
+                confidence = (1 - p_under) * 100
+            else:
+                selection = "Under 2.5 Goals"
+                confidence = p_under * 100
+                
         else:
-            selection = "Under 2.5 Goals"
-            confidence = p_under * 100
+            # Fallback to threshold
+            if total_xg > threshold:
+                selection = "Over 2.5 Goals"
+                excess = (total_xg - threshold) / threshold
+                confidence = 55 + min(20, excess * 20)
+            else:
+                selection = "Under 2.5 Goals"
+                deficit = (threshold - total_xg) / threshold
+                confidence = 55 + min(20, deficit * 20)
         
         # Apply bounds
         confidence = max(50, min(75, confidence))
         
         if self.debug:
-            print(f"  P(Under 2.5): {p_under:.2%}")
-            print(f"  Avg Variance: {avg_variance:.2f}")
             print(f"  Selection: {selection} ({confidence:.1f}%)")
         
         return {
@@ -824,61 +863,20 @@ class MatchPredictor:
             "confidence": round(confidence, 1)
         }
     
-    def _interpolate_probability(self, total_xg: float, distribution: Dict) -> float:
-        """Interpolate probability from distribution table"""
-        if not distribution:
-            # Fallback to simple threshold
-            threshold = self.league_config.get('over_threshold', self.league_config['avg_goals'])
-            return 0.6 if total_xg < threshold else 0.4
-        
-        # Sort distribution points
-        points = sorted(distribution.items())
-        
-        # If below lowest point, use that probability
-        if total_xg <= points[0][0]:
-            return points[0][1]
-        
-        # If above highest point, use that probability
-        if total_xg >= points[-1][0]:
-            return points[-1][1]
-        
-        # Find surrounding points and interpolate
-        for i in range(len(points) - 1):
-            x1, y1 = points[i]
-            x2, y2 = points[i + 1]
-            
-            if x1 <= total_xg <= x2:
-                # Linear interpolation
-                fraction = (total_xg - x1) / (x2 - x1)
-                return y1 + fraction * (y2 - y1)
-        
-        return 0.5  # Default
-    
     def _predict_btts_with_correlation(self, home_xg: float, away_xg: float,
                                      home: TeamProfile, away: TeamProfile) -> Dict:
-        """Predict BTTS with correlation (FIXED independence assumption)"""
+        """Predict BTTS with correlation"""
         
-        # Base probabilities from Poisson
+        # Base probabilities
         p_home_scores = 1 - math.exp(-home_xg)
         p_away_scores = 1 - math.exp(-away_xg)
         
-        # Get correlation parameter from league config
+        # Get correlation parameter
         correlation = self.league_config.get('btts_correlation', 0.15)
         
-        if self.debug:
-            print(f"\n🎯 BTTS CALCULATION (with correlation):")
-            print(f"  Home Score Prob: {p_home_scores:.2%}")
-            print(f"  Away Score Prob: {p_away_scores:.2%}")
-            print(f"  Correlation: {correlation:.2f}")
-        
-        # FIXED: Correlation-aware calculation
-        # When one team scores, the other is more likely to score
+        # Correlation-aware calculation
         p_both_score = p_home_scores * p_away_scores * (1 + correlation)
-        
-        # Also consider: home scores, away doesn't (but correlation reduces this)
         p_home_only = p_home_scores * (1 - p_away_scores) * (1 - correlation/2)
-        
-        # Away scores, home doesn't
         p_away_only = (1 - p_home_scores) * p_away_scores * (1 - correlation/2)
         
         # Total BTTS probability
@@ -891,13 +889,14 @@ class MatchPredictor:
         # Apply variance adjustment
         avg_variance = (home.variance_factor + away.variance_factor) / 2
         if avg_variance > 1.1:
-            btts_prob *= 1.05  # High variance slightly increases BTTS
+            btts_prob *= 1.05
         
-        if self.debug:
-            print(f"  Base BTTS Prob: {btts_prob:.1f}%")
-            print(f"  Team Tendency Factor: {tendency_factor:.2f}")
-            print(f"  Variance Factor: {avg_variance:.2f}")
-            print(f"  Final BTTS Prob: {btts_prob:.1f}%")
+        # Clean sheet streak adjustment
+        if home.last5_ga == 0 and home.recent_games_played >= 2:
+            btts_prob *= 0.8
+        
+        if away.last5_ga == 0 and away.recent_games_played >= 2:
+            btts_prob *= 0.8
         
         # League baseline
         baseline = self.league_config['btts_baseline']
@@ -911,12 +910,75 @@ class MatchPredictor:
         
         confidence = max(50, confidence)
         
-        if self.debug:
-            print(f"  League Baseline: {baseline}%")
-            print(f"  Selection: {selection} ({confidence:.1f}%)")
-        
         return {
             "type": "BTTS",
             "selection": selection,
             "confidence": round(confidence, 1)
         }
+
+# ============================================================================
+# EXAMPLE USAGE
+# ============================================================================
+
+if __name__ == "__main__":
+    # Example team data (simplified)
+    barcelona_data = {
+        'Team': 'Barcelona',
+        'Matches': 7,
+        'Wins': 7,
+        'Draws': 0,
+        'Losses': 0,
+        'Goals': 23,
+        'Goals_Against': 4,
+        'Points': 21,
+        'xG': 19.50,
+        'xGA': 6.68,
+        'Last5_Home_Wins': 5,
+        'Last5_Home_Draws': 0,
+        'Last5_Home_Losses': 0,
+        'Last5_Home_GF': 14,
+        'Last5_Home_GA': 4,
+        'Last5_Home_PTS': 15
+    }
+    
+    atletico_data = {
+        'Team': 'Atletico Madrid',
+        'Matches': 6,
+        'Wins': 2,
+        'Draws': 3,
+        'Losses': 1,
+        'Goals': 7,
+        'Goals_Against': 5,
+        'Points': 9,
+        'xG': 7.41,
+        'xGA': 6.99,
+        'Last5_Away_Wins': 2,
+        'Last5_Away_Draws': 3,
+        'Last5_Away_Losses': 0,
+        'Last5_Away_GF': 6,
+        'Last5_Away_GA': 3,
+        'Last5_Away_PTS': 9
+    }
+    
+    # Create league averages
+    league_avgs = LeagueAverages(
+        avg_home_goals=1.46,
+        avg_away_goals=1.12,
+        total_matches=139
+    )
+    
+    # Create predictor
+    predictor = MatchPredictor("la_liga", league_avgs, debug=True)
+    
+    # Create team profiles
+    barcelona = TeamProfile(barcelona_data, is_home=True, 
+                           league_averages=league_avgs, debug=True)
+    atletico = TeamProfile(atletico_data, is_home=False, 
+                          league_averages=league_avgs, debug=True)
+    
+    # Make prediction
+    result = predictor.predict(barcelona, atletico)
+    
+    print(f"\n📊 FINAL PREDICTIONS:")
+    for pred in result["predictions"]:
+        print(f"  {pred['type']}: {pred['selection']} ({pred['confidence']}%)")
