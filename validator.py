@@ -22,3 +22,10 @@ class ModelValidator:
     def get_predictions_count(self):
         """Get total predictions count"""
         return len(self.predictions)
+    
+    def get_calibration_data(self):
+        """Get calibration data for analysis"""
+        return {
+            "total_predictions": len(self.predictions),
+            "predictions": self.predictions
+        }
