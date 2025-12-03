@@ -738,4 +738,25 @@ class MatchPredictor:
         
         if btts_prob >= baseline:
             selection = "Yes"
-            confidence = min(80
+            confidence = min(80, btts_prob)
+        else:
+            selection = "No"
+            confidence = min(80, 100 - btts_prob)
+        
+        confidence = max(50, confidence)
+        
+        if self.debug:
+            print(f"  League Baseline: {baseline}%")
+            print(f"  Selection: {selection} ({confidence:.1f}%)")
+        
+        return {
+            "type": "BTTS",
+            "selection": selection,
+            "confidence": round(confidence, 1)
+        }
+    
+    def calibrate_model(self, predictions: List[float], outcomes: List[int]):
+        """Calibrate the model using historical data"""
+        self.calibrator.fit(predictions, outcomes)
+        if self.debug:
+            print(f"\n📈 MODEL CALIBRATED: {len(self.calibrator.calibration_map)} bins")
