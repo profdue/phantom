@@ -1,20 +1,23 @@
 """
-PHANTOM PREDICTOR v4.2 - Main Streamlit Application
+PHANTOM PREDICTOR v4.3 - Main Streamlit Application
 Statistically Validated • Form-First Logic • Risk-Aware Staking
+UPDATED IMPORTS
 """
 import streamlit as st
 import pandas as pd
 from typing import Dict, Optional
 import sys
 import os
-from datetime import datetime  # Add this
+from datetime import datetime
 
 # Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from models import MatchPredictor, TeamProfile, ModelValidator
+# CORRECTED IMPORTS
+from models import MatchPredictor, TeamProfile  # Removed ModelValidator from here
 from utils import DataLoader, PredictionLogger
 from betting_advisor import BettingAdvisor
+from validator import ModelValidator  # Now imported from validator.py
 
 # ============================================================================
 # STREAMLIT APP CONFIGURATION
@@ -23,7 +26,7 @@ from betting_advisor import BettingAdvisor
 def setup_page():
     """Configure Streamlit page settings"""
     st.set_page_config(
-        page_title="PHANTOM PREDICTOR v4.2",
+        page_title="PHANTOM PREDICTOR v4.3",
         page_icon="🔥",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -86,7 +89,7 @@ def setup_page():
     """, unsafe_allow_html=True)
     
     # Header
-    st.markdown('<h1 class="main-header">🔥 PHANTOM PREDICTOR v4.2</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🔥 PHANTOM PREDICTOR v4.3</h1>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Statistically Validated • Form-First Logic • xG Integration • Risk-Aware Staking</p>', unsafe_allow_html=True)
 
 def display_welcome():
@@ -397,15 +400,15 @@ def display_prediction_results(result: Dict, betting_advisor: BettingAdvisor):
     
     # Footer
     st.markdown("---")
-    st.caption(f"⚡ PHANTOM v4.2 • League: {result['analysis']['league']} • Statistically Validated • xG Integration")
+    st.caption(f"⚡ PHANTOM v4.3 • League: {result['analysis']['league']} • Statistically Validated • xG Integration")
 
 def display_methodology():
-    """Display the v4.2 methodology"""
-    st.subheader("📖 **PHANTOM v4.2 METHODOLOGY**")
+    """Display the v4.3 methodology"""
+    st.subheader("📖 **PHANTOM v4.3 METHODOLOGY**")
     
     with st.expander("**View Complete Methodology**", expanded=True):
         st.markdown("""
-        ### 🔬 **STATISTICAL FOUNDATION v4.2**
+        ### 🔬 **STATISTICAL FOUNDATION v4.3**
         
         **1. FORM-FIRST PREDICTION**
         ```
@@ -417,24 +420,25 @@ def display_methodology():
         
         **2. ATTACK & DEFENSE WITH xG INTEGRATION**
         ```
-        Attack Strength = (Weighted Goals × 70% + Weighted xG × 30%) ÷ League Baseline
+        Attack Strength = (Weighted Goals × 60% + Weighted xG × 40%) ÷ League Baseline
         
-        Defense Strength = Opponent Baseline ÷ (Weighted GA × 70% + Weighted xGA × 30%)
+        Defense Strength = Opponent Baseline ÷ (Weighted GA × 60% + Weighted xGA × 40%)
         
         • Proper home/away baselines (home vs home avg, away vs away avg)
         • Dynamic reliability weighting (50-80% based on recent games)
-        • Reasonable bounds: Attack 0.5-2.0, Defense 0.5-1.8
+        • Reasonable bounds: Attack 0.6-1.8, Defense 0.6-1.6
         ```
         
         **3. EXPECTED GOALS CALCULATION (NO DOUBLE ADVANTAGE)**
         ```
-        Base xG = League Avg per Team × (Attack / Opponent Defense)
+        Neutral Baseline = (Home League Avg + Away League Avg) / 2
+        Base xG = Neutral Baseline × (Attack / Opponent Defense)
         Home xG = Base xG × Home Advantage (applied ONCE)
         
         • League average per team = ~1.47 (Premier League)
         • Home advantage = 18% (from config, applied once)
-        • Conservative hot attack boost (max 5%)
-        • Realistic caps: Home ≤ 4.5, Away ≤ 4.0
+        • Conservative hot attack boost (max 4%)
+        • Realistic caps: Home ≤ 4.0, Away ≤ 3.5
         ```
         
         **4. REAL POISSON PROBABILITIES**
@@ -444,7 +448,7 @@ def display_methodology():
         P(draw) = Σ_i=j P(home=i) × P(away=j)
         P(away_win) = Σ_i<j P(home=i) × P(away=j)
         
-        Fallback to proportional method if Poisson fails
+        Pure Poisson method - no hybrid fallbacks
         ```
         
         **5. PROPER BTTS CALCULATION**
@@ -456,32 +460,37 @@ def display_methodology():
         Tendency: 0.7 (low) to 1.3 (high) based on expected both games
         ```
         
-        **6. CALIBRATION & RELIABILITY**
+        **6. BAYESIAN SHRINKAGE (NOT 33% FLATTENING)**
         ```
-        • Calibration: 15% blend with league historical rates
-        • Reliability: Less aggressive adjustment for sparse data
-        • Sample-size aware: Blends with league averages, not uniform 33%
+        Bayesian Shrinkage Formula:
+        posterior = (n × model_prob + k × prior_prob) / (n + k)
+        
+        • n = sample size (recent games)
+        • k = prior strength (default: 10)
+        • prior_prob = league historical rates
+        
+        Blends with league priors, not uniform 33% flattening
         ```
         
-        ### 🎯 **KEY IMPROVEMENTS IN v4.2**
+        ### 🎯 **KEY IMPROVEMENTS IN v4.3**
         
         **1. Fixed Critical Issues**
         • ✅ No double home advantage
         • ✅ BTTS uses Poisson estimation (not goals count)
         • ✅ Real Poisson probabilities (not proportional)
-        • ✅ xG/xGA integrated in attack/defense
+        • ✅ Bayesian shrinkage (not 33% flattening)
         
         **2. Statistical Rigor**
-        • ✅ Proper home/away baselines
+        • ✅ Proper neutral baseline xG
         • ✅ Realistic draw rates (25% at average xG)
         • ✅ Conservative boosts and caps
         • ✅ Dynamic reliability weighting
         
-        **3. Practical Implementation**
-        • ✅ Debug mode for development
-        • ✅ Fallback methods for edge cases
-        • ✅ Realistic value bounds
-        • ✅ Transparent calculations
+        **3. Validation System**
+        • ✅ Synthetic backtesting
+        • ✅ Calibration curves
+        • ✅ Statistical significance testing
+        • ✅ Market efficiency analysis
         ```
         """)
 
@@ -534,9 +543,11 @@ def main():
     
     if 'model_validator' not in st.session_state:
         st.session_state.model_validator = ModelValidator()
+        print("✅ ModelValidator initialized")
     
     if 'prediction_logger' not in st.session_state:
         st.session_state.prediction_logger = PredictionLogger()
+        print("✅ PredictionLogger initialized")
     
     # Sidebar
     with st.sidebar:
@@ -566,6 +577,21 @@ def main():
             help="Minimum confidence percentage for betting"
         )
         st.session_state.betting_advisor.min_confidence = min_confidence
+        
+        # Run validation button
+        if st.button("🧪 **RUN VALIDATION**", type="secondary", use_container_width=True):
+            with st.spinner("Running synthetic validation..."):
+                try:
+                    validation_report = st.session_state.model_validator.generate_validation_report(
+                        synthetic_test=True
+                    )
+                    st.success("✅ Validation completed!")
+                    
+                    with st.expander("📊 View Validation Results", expanded=False):
+                        st.json(validation_report)
+                        
+                except Exception as e:
+                    st.error(f"❌ Validation error: {str(e)}")
         
         st.markdown("---")
         
@@ -660,19 +686,19 @@ def main():
                 st.write(f"**Weekly Loss Limit:** {risk_report['weekly_loss_limit']:.2f} units")
         
         st.markdown("---")
-        st.markdown("### 🎯 **v4.2 FEATURES**")
+        st.markdown("### 🎯 **v4.3 FEATURES**")
         st.info("""
         **Statistical Rigor:**
-        • Real Poisson probabilities
-        • xG/xGA integrated (70/30)
-        • No double home advantage
-        • Proper BTTS calculation
+        • Neutral baseline xG
+        • Pure Poisson probabilities
+        • Bayesian shrinkage
+        • Full validation system
         
         **Risk-Aware:**
         • Fractional Kelly staking
         • Edge-based decisions
         • Bankroll management
-        • Debug mode available
+        • Validation framework
         """)
         
         st.markdown("---")
@@ -808,6 +834,9 @@ def main():
                         
                         # Display results
                         display_prediction_results(result, st.session_state.betting_advisor)
+                        
+                        # Log to validator
+                        st.session_state.model_validator.add_prediction(result)
                         
                     except Exception as e:
                         st.error(f"❌ **Prediction error:** {str(e)}")
