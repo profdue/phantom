@@ -58,6 +58,16 @@ LEAGUE_CONFIGS = {
         "btts_baseline": 50,
         "win_threshold": 0.26,
         "form_weight": 0.36
+    },
+    "rfpl": {
+        "name": "Russian Premier League",
+        "avg_goals": 2.68,
+        "over_threshold": 2.60,
+        "under_threshold": 2.40,
+        "home_advantage": 0.23,
+        "btts_baseline": 50,
+        "win_threshold": 0.26,
+        "form_weight": 0.36
     }
 }
 
