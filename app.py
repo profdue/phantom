@@ -1,6 +1,7 @@
 """
 PHANTOM PREDICTOR v4.3 - Main Streamlit Application
 Statistically Validated • Form-First Logic • Risk-Aware Staking
+UPDATED: Uses model's scoreline prediction instead of rounded xG
 """
 import streamlit as st
 import pandas as pd
@@ -87,6 +88,13 @@ def setup_page():
         border-radius: 5px;
         margin: 1rem 0;
     }
+    .scoreline-header {
+        font-size: 3rem;
+        font-weight: 800;
+        text-align: center;
+        color: #FF4B4B;
+        margin: 1rem 0;
+    }
     </style>
     """, unsafe_allow_html=True)
     
@@ -104,7 +112,7 @@ def display_welcome():
         st.markdown("### 📊 **STATISTICAL RIGOR**")
         st.write("""
         • Real Poisson probabilities
-        • xG/xGA integrated (70/30 blend)
+        • xG/xGA integrated (60/40 blend)
         • Proper home/away distinction
         • League-average calibrated
         """)
@@ -375,30 +383,91 @@ def display_prediction_results(result: Dict, betting_advisor: BettingAdvisor):
     # Summary
     st.markdown(f"#### 📋 **SUMMARY:** {advice['summary']}")
     
-    # Expected scoreline
+    # 🔥🔥🔥 UPDATED: Expected scoreline using model's prediction
     st.markdown("---")
     st.subheader("📈 **EXPECTED SCORELINE**")
     
-    home_xg = result['analysis']['expected_goals']['home']
-    away_xg = result['analysis']['expected_goals']['away']
-    
-    # Convert xG to likely scoreline using Poisson
-    # Simple rounding for display
-    home_est = round(home_xg)
-    away_est = round(away_xg)
-    
-    # Ensure minimum goals for reasonable xG
-    if home_xg > 0.7 and home_est == 0:
-        home_est = 1
-    if away_xg > 0.7 and away_est == 0:
-        away_est = 1
-    
-    # Display scoreline
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown(f"<h1 style='text-align: center;'>{home_est} - {away_est}</h1>", 
-                   unsafe_allow_html=True)
-        st.caption(f"Based on xG: {home_xg:.2f} - {away_xg:.2f}")
+    # Check if scorelines are available in result
+    if 'scorelines' in result:
+        scorelines = result['scorelines']
+        most_likely = scorelines['most_likely']
+        
+        # Display most likely scoreline
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            # Big, centered scoreline
+            st.markdown(f"<div class='scoreline-header'>{most_likely['home_goals']} - {most_likely['away_goals']}</div>", 
+                       unsafe_allow_html=True)
+            
+            # Probability
+            probability_pct = most_likely['probability'] * 100
+            st.caption(f"Most likely scoreline ({probability_pct:.1f}% probability)")
+            
+            # Show top 3 scorelines
+            with st.expander("📊 **Top 3 Most Likely Scorelines**", expanded=False):
+                for scoreline in scorelines.get('top_3', []):
+                    prob_pct = scoreline['probability'] * 100
+                    st.write(f"**{scoreline['home_goals']}-{scoreline['away_goals']}**: {prob_pct:.1f}% probability")
+            
+            # Show xG values
+            home_xg = result['analysis']['expected_goals']['home']
+            away_xg = result['analysis']['expected_goals']['away']
+            st.caption(f"Based on xG: {home_xg:.2f} - {away_xg:.2f}")
+            
+            # Show match outcome consistency
+            outcome = most_likely['outcome']
+            if outcome == "home_win":
+                st.success("✓ Consistent with Home Win prediction" if any(
+                    p['selection'] == "Home Win" for p in result['predictions'] if p['type'] == "Match Winner"
+                ) else "⚠️ Scoreline suggests Home Win, but different prediction")
+            elif outcome == "away_win":
+                st.success("✓ Consistent with Away Win prediction" if any(
+                    p['selection'] == "Away Win" for p in result['predictions'] if p['type'] == "Match Winner"
+                ) else "⚠️ Scoreline suggests Away Win, but different prediction")
+            else:
+                st.success("✓ Consistent with Draw prediction" if any(
+                    p['selection'] == "Draw" for p in result['predictions'] if p['type'] == "Match Winner"
+                ) else "⚠️ Scoreline suggests Draw, but different prediction")
+            
+            # Show BTTS consistency
+            btts = most_likely['btts']
+            btts_prediction = next((p for p in result['predictions'] if p['type'] == "BTTS"), None)
+            if btts_prediction:
+                if (btts and btts_prediction['selection'] == "Yes") or (not btts and btts_prediction['selection'] == "No"):
+                    st.success("✓ Consistent with BTTS prediction")
+                else:
+                    st.warning("⚠️ Scoreline and BTTS prediction disagree")
+    else:
+        # Fallback to old display (but with correct math)
+        home_xg = result['analysis']['expected_goals']['home']
+        away_xg = result['analysis']['expected_goals']['away']
+        
+        # Simple Poisson calculation for most likely scoreline
+        import math
+        def get_most_likely_scoreline(home_xg, away_xg, max_goals=4):
+            max_prob = 0
+            best_score = (0, 0)
+            
+            for i in range(max_goals + 1):
+                for j in range(max_goals + 1):
+                    p_home = math.exp(-home_xg) * (home_xg ** i) / math.factorial(i)
+                    p_away = math.exp(-away_xg) * (away_xg ** j) / math.factorial(j)
+                    prob = p_home * p_away
+                    
+                    if prob > max_prob:
+                        max_prob = prob
+                        best_score = (i, j)
+            
+            return best_score, max_prob
+        
+        most_likely, prob = get_most_likely_scoreline(home_xg, away_xg)
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown(f"<h2 style='text-align: center;'>{most_likely[0]} - {most_likely[1]}</h2>", 
+                       unsafe_allow_html=True)
+            st.caption(f"Most likely scoreline ({prob:.1%} probability)")
+            st.caption(f"Based on xG: {home_xg:.2f} - {away_xg:.2f}")
     
     # Footer
     st.markdown("---")
@@ -522,13 +591,13 @@ def main():
         if st.button("📥 **LOAD LEAGUE DATA**", type="primary", use_container_width=True):
             with st.spinner(f"Loading {selected_league_key} data..."):
                 try:
-                    # Load data - now getting 3 values
-                    home_df, away_df, league_averages = st.session_state.data_loader.load_league_data(selected_league_key)  # ✅ FIXED
+                    # Load data
+                    home_df, away_df, league_averages = st.session_state.data_loader.load_league_data(selected_league_key)
                     
                     # Store in session state
                     st.session_state.home_df = home_df
                     st.session_state.away_df = away_df
-                    st.session_state.league_averages = league_averages  # ✅ NEW: Store league averages
+                    st.session_state.league_averages = league_averages
                     st.session_state.league_name = selected_league_key
                     st.session_state.league_loaded = True
                     
