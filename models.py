@@ -3,6 +3,7 @@ PHANTOM v4.3 - Production Ready Core Models
 All mathematical errors fixed. Statistically rigorous.
 ALL FIXES APPLIED: Extreme form, style matrix, variance adjustments
 BTTS FIX APPLIED: Corrected probability calculation
+SCORELINE FIX: Added proper scoreline prediction
 """
 import math
 import numpy as np
@@ -465,6 +466,48 @@ class PoissonCalculator:
             away_win /= total
         
         return home_win, draw, away_win
+    
+    @staticmethod
+    def calculate_scoreline_probabilities(home_xg: float, away_xg: float,
+                                        home_variance: float = 1.0,
+                                        away_variance: float = 1.0,
+                                        max_goals: int = 4) -> List[Dict]:
+        """Calculate probabilities for all possible scorelines"""
+        # Adjust xG based on variance factors
+        adjusted_home_xg = home_xg * (1 + (home_variance - 1.0) * 0.1)
+        adjusted_away_xg = away_xg * (1 + (away_variance - 1.0) * 0.1)
+        
+        scorelines = []
+        
+        for i in range(max_goals + 1):
+            for j in range(max_goals + 1):
+                # Poisson probability for exact scoreline
+                p_home = math.exp(-adjusted_home_xg) * (adjusted_home_xg ** i) / math.factorial(i)
+                p_away = math.exp(-adjusted_away_xg) * (adjusted_away_xg ** j) / math.factorial(j)
+                probability = p_home * p_away
+                
+                # Determine outcome type
+                if i > j:
+                    outcome = "home_win"
+                elif i < j:
+                    outcome = "away_win"
+                else:
+                    outcome = "draw"
+                
+                scorelines.append({
+                    "home_goals": i,
+                    "away_goals": j,
+                    "score": f"{i}-{j}",
+                    "probability": probability,
+                    "total_goals": i + j,
+                    "btts": i > 0 and j > 0,
+                    "outcome": outcome
+                })
+        
+        # Sort by probability (highest first)
+        scorelines.sort(key=lambda x: x["probability"], reverse=True)
+        
+        return scorelines
 
 class BayesianShrinker:
     """🔥 FIX 4: Bayesian shrinkage that respects extreme cases"""
@@ -522,6 +565,10 @@ class MatchPredictor:
             'away_win': league_averages.actual_away_win_rate
         }
         
+        # Store team profiles for scoreline calculation
+        self.home_profile = None
+        self.away_profile = None
+        
         if self.debug:
             print(f"\n🎯 PREDICTOR INITIALIZED FOR {league_name.upper()}")
             print(f"  Neutral Baseline: {league_averages.neutral_baseline:.2f}")
@@ -533,6 +580,10 @@ class MatchPredictor:
         
         if self.debug:
             print(f"\n🔮 PREDICTING: {home_team.name} vs {away_team.name}")
+        
+        # Store team profiles for scoreline calculation
+        self.home_profile = home_team
+        self.away_profile = away_team
         
         # 1. Calculate expected goals (NO DOUBLE HOME ADVANTAGE)
         home_xg, away_xg = self._calculate_expected_goals(home_team, away_team)
@@ -547,12 +598,15 @@ class MatchPredictor:
         # 4. BTTS prediction (FIXED - CORRECTED VERSION)
         btts_pred = self._predict_btts(home_xg, away_xg, home_team, away_team)
         
+        # 5. Scoreline prediction (NEW - Mathematically correct)
+        scoreline_pred = self._predict_scorelines(home_xg, away_xg, home_team, away_team)
+        
         # Combine predictions
         predictions = [winner_pred, total_pred, btts_pred]
         
         # 🔥 ADD CONSISTENCY CHECK
         if self.debug:
-            self._check_prediction_consistency(predictions, home_xg, away_xg)
+            self._check_prediction_consistency(predictions, home_xg, away_xg, scoreline_pred)
         
         return {
             "analysis": {
@@ -581,7 +635,8 @@ class MatchPredictor:
                 "home_team": home_team.name,
                 "away_team": away_team.name
             },
-            "predictions": predictions
+            "predictions": predictions,
+            "scorelines": scoreline_pred  # NEW: Add scorelines to results
         }
     
     def _calculate_expected_goals(self, home: TeamProfile, away: TeamProfile) -> Tuple[float, float]:
@@ -1053,11 +1108,79 @@ class MatchPredictor:
             "confidence": round(confidence, 1)
         }
     
+    def _predict_scorelines(self, home_xg: float, away_xg: float,
+                           home: TeamProfile, away: TeamProfile) -> Dict:
+        """🔥 NEW: Predict most likely scorelines using Poisson distribution"""
+        
+        # Calculate all scoreline probabilities
+        scorelines = self.poisson_calc.calculate_scoreline_probabilities(
+            home_xg, away_xg,
+            home.variance_factor, away.variance_factor,
+            max_goals=4
+        )
+        
+        # Get most likely scoreline
+        most_likely = scorelines[0]
+        
+        # Get top 3 scorelines
+        top_3 = scorelines[:3]
+        
+        # Calculate derived probabilities from scorelines (for cross-validation)
+        btts_from_scores = sum(s["probability"] for s in scorelines if s["btts"])
+        over_2_5_from_scores = sum(s["probability"] for s in scorelines if s["total_goals"] > 2.5)
+        
+        # Calculate win/draw/loss from scorelines
+        home_win_from_scores = sum(s["probability"] for s in scorelines if s["outcome"] == "home_win")
+        draw_from_scores = sum(s["probability"] for s in scorelines if s["outcome"] == "draw")
+        away_win_from_scores = sum(s["probability"] for s in scorelines if s["outcome"] == "away_win")
+        
+        if self.debug:
+            print(f"\n📈 SCORELINE ANALYSIS:")
+            print(f"  Most likely: {most_likely['score']} ({most_likely['probability']:.1%})")
+            print(f"  BTTS from scores: {btts_from_scores:.1%}")
+            print(f"  Over 2.5 from scores: {over_2_5_from_scores:.1%}")
+            print(f"  Win probabilities from scores: H:{home_win_from_scores:.1%}, D:{draw_from_scores:.1%}, A:{away_win_from_scores:.1%}")
+        
+        return {
+            "most_likely": {
+                "score": most_likely["score"],
+                "home_goals": most_likely["home_goals"],
+                "away_goals": most_likely["away_goals"],
+                "probability": most_likely["probability"],
+                "btts": most_likely["btts"],
+                "outcome": most_likely["outcome"]
+            },
+            "top_3": [
+                {
+                    "score": s["score"],
+                    "home_goals": s["home_goals"],
+                    "away_goals": s["away_goals"],
+                    "probability": s["probability"],
+                    "description": f"{s['home_goals']}-{s['away_goals']} ({s['probability']:.1%})"
+                }
+                for s in top_3
+            ],
+            "derived_probabilities": {
+                "btts": btts_from_scores,
+                "over_2.5": over_2_5_from_scores,
+                "home_win": home_win_from_scores,
+                "draw": draw_from_scores,
+                "away_win": away_win_from_scores
+            },
+            "all_scorelines": [
+                {
+                    "score": s["score"],
+                    "probability": s["probability"]
+                }
+                for s in scorelines
+            ]
+        }
+    
     def _check_prediction_consistency(self, predictions: List[Dict], home_xg: float, 
-                                     away_xg: float) -> bool:
+                                     away_xg: float, scoreline_pred: Dict) -> bool:
         """Check if predictions are mathematically consistent"""
         
-        # Extract probabilities
+        # Extract probabilities from predictions
         winner_pred = predictions[0]
         total_pred = predictions[1]
         btts_pred = predictions[2]
@@ -1066,7 +1189,7 @@ class MatchPredictor:
         draw_prob = winner_pred["probabilities"]["draw"] / 100
         away_prob = winner_pred["probabilities"]["away"] / 100
         
-        # Calculate implied probabilities from BTTS and Total Goals
+        # Calculate implied probabilities from BTTS and Total Goals predictions
         if btts_pred["selection"] == "Yes":
             btts_confidence = btts_pred["confidence"] / 100
         else:
@@ -1079,16 +1202,41 @@ class MatchPredictor:
             over_confidence = total_pred["confidence"] / 100
             under_confidence = 1 - over_confidence
         
-        # 🔥 Check 1: If BTTS high and Under high, draw should be high
+        # Get probabilities from scoreline analysis
+        derived = scoreline_pred.get("derived_probabilities", {})
+        btts_from_scores = derived.get("btts", 0)
+        over_from_scores = derived.get("over_2.5", 0)
+        home_win_from_scores = derived.get("home_win", 0)
+        draw_from_scores = derived.get("draw", 0)
+        away_win_from_scores = derived.get("away_win", 0)
+        
+        # 🔥 Check 1: Scoreline predictions should match BTTS prediction
+        if abs(btts_from_scores - btts_confidence) > 0.15:
+            warnings.warn(f"⚠️ BTTS INCONSISTENCY: Scorelines {btts_from_scores:.1%} vs Prediction {btts_confidence:.1%}")
+        
+        # 🔥 Check 2: Scoreline predictions should match Total Goals prediction
+        if abs(over_from_scores - over_confidence) > 0.15:
+            warnings.warn(f"⚠️ TOTAL GOALS INCONSISTENCY: Scorelines {over_from_scores:.1%} vs Prediction {over_confidence:.1%}")
+        
+        # 🔥 Check 3: Scoreline predictions should match Winner prediction
+        if abs(home_win_from_scores - home_prob) > 0.15:
+            warnings.warn(f"⚠️ HOME WIN INCONSISTENCY: Scorelines {home_win_from_scores:.1%} vs Prediction {home_prob:.1%}")
+        
+        if abs(draw_from_scores - draw_prob) > 0.15:
+            warnings.warn(f"⚠️ DRAW INCONSISTENCY: Scorelines {draw_from_scores:.1%} vs Prediction {draw_prob:.1%}")
+        
+        if abs(away_win_from_scores - away_prob) > 0.15:
+            warnings.warn(f"⚠️ AWAY WIN INCONSISTENCY: Scorelines {away_win_from_scores:.1%} vs Prediction {away_prob:.1%}")
+        
+        # 🔥 Check 4: If BTTS high and Under high, draw should be high
         if btts_confidence > 0.7 and under_confidence > 0.6:
-            # The only Under 2.5 + BTTS outcome is 1-1 (draw)
             implied_draw_min = max(0, btts_confidence + under_confidence - 1)
             if implied_draw_min > 0 and draw_prob < implied_draw_min * 0.8:
                 warnings.warn(f"⚠️ CONSISTENCY WARNING: Draw probability ({draw_prob:.1%}) "
                             f"too low for BTTS ({btts_confidence:.1%}) + Under ({under_confidence:.1%})")
                 return False
         
-        # 🔥 Check 2: BTTS should not exceed min(scoring_prob_home, scoring_prob_away)
+        # 🔥 Check 5: BTTS should not exceed min(scoring_prob_home, scoring_prob_away)
         home_score_prob = 1 - math.exp(-home_xg)
         away_score_prob = 1 - math.exp(-away_xg)
         max_possible_btts = min(home_score_prob, away_score_prob) * 1.2  # With correlation
@@ -1098,7 +1246,7 @@ class MatchPredictor:
                         f"max possible ({max_possible_btts:.1%})")
             return False
         
-        # 🔥 Check 3: Total goals confidence should align with xG
+        # 🔥 Check 6: Total goals confidence should align with xG
         total_xg = home_xg + away_xg
         league_avg = self.league_config['avg_goals']
         
@@ -1112,5 +1260,7 @@ class MatchPredictor:
         
         if self.debug:
             print(f"✅ Predictions are mathematically consistent")
+            print(f"  Scoreline validation: BTTS {btts_from_scores:.1%} vs {btts_confidence:.1%}")
+            print(f"  Scoreline validation: Over {over_from_scores:.1%} vs {over_confidence:.1%}")
         
         return True
