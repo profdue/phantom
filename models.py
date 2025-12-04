@@ -1,5 +1,5 @@
 """
-PHANTOM v4.4 - Production Ready Core Models
+PHANTOM v4.3 - Production Ready Core Models
 All mathematical errors fixed. Statistically rigorous.
 ALL FIXES APPLIED: Extreme form, style matrix, variance adjustments
 BTTS FIX APPLIED: Dynamic correlation based on matchup imbalance
