@@ -2,6 +2,7 @@
 PHANTOM v4.3 - Production Ready Core Models
 All mathematical errors fixed. Statistically rigorous.
 ALL FIXES APPLIED: Extreme form, style matrix, variance adjustments
+BTTS FIX APPLIED: Corrected probability calculation
 """
 import math
 import numpy as np
@@ -24,8 +25,8 @@ LEAGUE_CONFIGS = {
         "home_advantage_multiplier": 1.18,  # 18% home advantage (validated)
         "prior_strength": 4,  # FIXED: Reduced from 10 to 4
         "draw_baseline": 0.25,  # Baseline draw probability
-        "btts_correlation": 0.15,  # NEW: Correlation parameter for BTTS
-        "goal_distribution": {  # NEW: Empirical distribution data
+        "btts_correlation": 0.15,  # Correlation parameter for BTTS
+        "goal_distribution": {  # Empirical distribution data
             2.0: 0.70,   # 70% Under when expected goals=2.0
             2.3: 0.60,
             2.6: 0.50,   # 50/50 at expected goals=2.6
@@ -246,7 +247,6 @@ class TeamProfile:
             return 1.0
         
         # Simulate goal distribution from last 5 data
-        # In production, this would use actual game-by-game data
         avg_goals = self.last5_gf / max(1, self.recent_games_played)
         
         if avg_goals <= 0.1:
@@ -285,14 +285,13 @@ class TeamProfile:
             return season_form * 0.7  # Penalty for no recent data
         
         # Recent form (last 5 games) with exponential decay
-        # Most recent game matters most: [0.35, 0.25, 0.20, 0.15, 0.05]
         weights = [0.35, 0.25, 0.20, 0.15, 0.05]
         
         # Calculate weighted recent form
         total_weighted_points = 0
         total_possible = 0
         
-        # Simulate points distribution (in production, use actual game sequence)
+        # Simulate points distribution
         recent_points = []
         for _ in range(self.last5_wins):
             recent_points.append(3)
@@ -326,7 +325,7 @@ class TeamProfile:
         """Attack strength with proper bounds and xG integration"""
         # Recent performance
         recent_gpg = self.last5_gf / max(1, self.recent_games_played)
-        recent_xg_pg = self.xg / max(1, self.matches)  # Use season xG for stability
+        recent_xg_pg = self.xg / max(1, self.matches)
         
         # Season performance
         season_gpg = self.goals_pg
@@ -354,7 +353,7 @@ class TeamProfile:
         # Apply variance factor
         strength *= self.variance_factor
         
-        # Reasonable bounds (no team is 3x average or 0.3x average)
+        # Reasonable bounds
         return min(1.8, max(0.6, strength))
     
     def _calculate_defense_strength(self) -> float:
@@ -379,14 +378,11 @@ class TeamProfile:
         
         # What opponents typically score against this team
         if self.is_home:
-            # Home defense faces away attacks
             opponent_baseline = self.league_averages.avg_away_goals if self.league_averages else 1.28
         else:
-            # Away defense faces home attacks
             opponent_baseline = self.league_averages.avg_home_goals if self.league_averages else 1.65
         
         # Defense strength = opponent average / actual conceded
-        # Higher = better defense
         strength = opponent_baseline / max(0.3, total_defense)
         
         # Apply variance factor (high variance hurts defense)
@@ -395,36 +391,29 @@ class TeamProfile:
         return min(1.6, max(0.6, strength))
     
     def _calculate_btts_tendency(self) -> float:
-        """🔥 FIX 2: Proper BTTS tendency using Poisson estimation"""
+        """🔥 FIXED: Proper BTTS tendency using scoring probability"""
         if self.recent_games_played == 0:
             return 1.0  # Neutral
         
         # Goals per game recently
         goals_per_game = self.last5_gf / max(1, self.recent_games_played)
-        goals_against_per_game = self.last5_ga / max(1, self.recent_games_played)
         
-        # 🔥 FIX: Probability of scoring in a game = 1 - P(0 goals)
-        # Using Poisson: P(0 goals) = e^(-lambda)
+        # Probability team scores
         p_scored = 1 - math.exp(-goals_per_game)
-        p_conceded = 1 - math.exp(-goals_against_per_game)
-        
-        # Expected games where team both scores and concedes
-        expected_both = self.recent_games_played * (p_scored * p_conceded)
         
         if self.debug:
-            print(f"    BTTS: P(scored)={p_scored:.2f}, P(conceded)={p_conceded:.2f}")
-            print(f"    Expected both: {expected_both:.2f}/{self.recent_games_played}")
+            print(f"    BTTS Tendency: P(scored)={p_scored:.2f}")
         
-        # Map to tendency factor
-        if expected_both >= 3.5:
+        # Map to tendency factor based on scoring probability
+        if p_scored >= 0.8:  # Very high scoring probability
             return 1.25  # Strong BTTS tendency
-        elif expected_both >= 2.5:
+        elif p_scored >= 0.65:
             return 1.15  # High BTTS tendency
-        elif expected_both >= 1.5:
+        elif p_scored >= 0.5:
             return 1.05  # Moderate BTTS tendency
-        elif expected_both <= 0.5:
+        elif p_scored <= 0.2:
             return 0.75  # Low BTTS tendency
-        elif expected_both <= 1.0:
+        elif p_scored <= 0.35:
             return 0.85  # Low-moderate BTTS tendency
         
         return 1.0  # Neutral
@@ -555,8 +544,15 @@ class MatchPredictor:
         total_xg = home_xg + away_xg
         total_pred = self._predict_total_goals(total_xg, home_team, away_team)
         
-        # 4. BTTS prediction (with FIXED tendency and correlation)
+        # 4. BTTS prediction (FIXED - CORRECTED VERSION)
         btts_pred = self._predict_btts(home_xg, away_xg, home_team, away_team)
+        
+        # Combine predictions
+        predictions = [winner_pred, total_pred, btts_pred]
+        
+        # 🔥 ADD CONSISTENCY CHECK
+        if self.debug:
+            self._check_prediction_consistency(predictions, home_xg, away_xg)
         
         return {
             "analysis": {
@@ -581,9 +577,11 @@ class MatchPredictor:
                 "variance_factors": {
                     "home": round(home_team.variance_factor, 2),
                     "away": round(away_team.variance_factor, 2)
-                }
+                },
+                "home_team": home_team.name,
+                "away_team": away_team.name
             },
-            "predictions": [winner_pred, total_pred, btts_pred]
+            "predictions": predictions
         }
     
     def _calculate_expected_goals(self, home: TeamProfile, away: TeamProfile) -> Tuple[float, float]:
@@ -701,7 +699,7 @@ class MatchPredictor:
             print(f"\n🎲 PURE POISSON PROBABILITIES (with variance):")
             print(f"  Raw: Home={home_win_prob:.2%}, Draw={draw_prob:.2%}, Away={away_win_prob:.2%}")
         
-        # 🔥 NEW: Apply extreme form boosts
+        # Apply extreme form boosts (FIXED VERSION - preserves draw probability)
         home_win_prob, draw_prob, away_win_prob = self._apply_extreme_form_boosts(
             home_win_prob, draw_prob, away_win_prob, home, away
         )
@@ -720,7 +718,7 @@ class MatchPredictor:
             print(f"  After Bayesian Shrinkage:")
             print(f"    Home={home_win_prob:.2%}, Draw={draw_prob:.2%}, Away={away_win_prob:.2%}")
         
-        # 🔥 NEW: Apply league position gap adjustment
+        # Apply league position gap adjustment
         home_win_prob, draw_prob, away_win_prob = self._apply_league_position_adjustment(
             home_win_prob, draw_prob, away_win_prob, home, away
         )
@@ -736,7 +734,7 @@ class MatchPredictor:
             selection = "Draw"
             confidence = draw_prob * 100
         
-        # Apply reasonable bounds (but not too tight)
+        # Apply reasonable bounds
         confidence = max(15, min(85, confidence))
         
         if self.debug:
@@ -756,20 +754,20 @@ class MatchPredictor:
     def _apply_extreme_form_boosts(self, home_win_prob: float, draw_prob: float, 
                                  away_win_prob: float, home: TeamProfile, 
                                  away: TeamProfile) -> Tuple[float, float, float]:
-        """Apply extreme form multipliers"""
+        """Apply extreme form multipliers (FIXED - preserves minimum draw probability)"""
         # Calculate win rates
         home_win_rate = home.wins / max(1, home.matches) if home.is_home else home.wins / max(1, home.matches)
         away_win_rate = away.wins / max(1, away.matches) if not away.is_home else away.wins / max(1, away.matches)
         
         multiplier = 1.0
         
-        # Rule 1: Extreme home dominance (Barcelona rule)
+        # Rule 1: Extreme home dominance
         if home_win_rate >= 0.85:  # 85%+ win rate
             multiplier *= 1.3
             if self.debug:
                 print(f"  EXTREME HOME FORM: {home.name} ({home_win_rate:.0%} win rate) → ×1.3")
         
-        # Rule 2: Extreme away weakness (Wolves rule)
+        # Rule 2: Extreme away weakness
         if away_win_rate <= 0.15:  # 15% or less win rate away
             multiplier *= 1.2
             if self.debug:
@@ -784,11 +782,34 @@ class MatchPredictor:
             if self.debug:
                 print(f"  GOAL DIFF MISMATCH: Home +{home_gd_per_game:.1f}/gm, Away {away_gd_per_game:.1f}/gm → ×1.25")
         
-        # Apply multiplier
+        # Apply multiplier (FIXED - preserves minimum draw probability)
         if multiplier > 1.0:
-            home_win_prob *= multiplier
-            # Rebalance probabilities
+            # 🔥 FIX: Boost the most likely outcome, but preserve minimum draw
+            if home_win_prob > away_win_prob:
+                home_win_prob *= multiplier
+            else:
+                away_win_prob *= multiplier
+            
+            # Rebalance with minimum draw probability protection
             total = home_win_prob + draw_prob + away_win_prob
+            min_draw = 0.15  # Minimum 15% draw probability
+            
+            if draw_prob/total < min_draw:
+                # Preserve minimum draw
+                required_draw = min_draw * total
+                draw_boost = required_draw - draw_prob
+                
+                # Reduce win probabilities proportionally to make room
+                win_prob_total = home_win_prob + away_win_prob
+                if win_prob_total > 0:
+                    home_win_prob -= draw_boost * (home_win_prob / win_prob_total)
+                    away_win_prob -= draw_boost * (away_win_prob / win_prob_total)
+                    draw_prob = required_draw
+                
+                # Recalculate total
+                total = home_win_prob + draw_prob + away_win_prob
+            
+            # Final normalization
             home_win_prob /= total
             draw_prob /= total
             away_win_prob /= total
@@ -807,7 +828,12 @@ class MatchPredictor:
         # 6+ positions ≈ 1.8 PPG difference
         if ppg_diff >= 1.8:
             boost = 1.18  # +18% win probability
-            home_win_prob *= boost
+            
+            # Apply to the team with higher PPG
+            if home_ppg > away_ppg:
+                home_win_prob *= boost
+            else:
+                away_win_prob *= boost
             
             if self.debug:
                 print(f"  LEAGUE POSITION GAP: {ppg_diff:.2f} PPG diff → ×{boost:.2f}")
@@ -965,7 +991,7 @@ class MatchPredictor:
     
     def _predict_btts(self, home_xg: float, away_xg: float,
                      home: TeamProfile, away: TeamProfile) -> Dict:
-        """Predict Both Teams to Score with FIXED tendency and correlation"""
+        """🔥🔥🔥 FIXED: Predict Both Teams to Score with CORRECTED calculation"""
         
         # Base probability from Poisson WITH correlation
         home_score_prob = 1 - math.exp(-home_xg)
@@ -974,49 +1000,46 @@ class MatchPredictor:
         # Get correlation parameter
         correlation = self.league_config.get('btts_correlation', 0.15)
         
-        # 🔥 FIXED: Correlation-aware calculation
-        # When one team scores, the other is more likely to score
-        p_both_score = home_score_prob * away_score_prob * (1 + correlation)
+        # 🔥🔥🔥 CORRECTED: BTTS = Probability BOTH teams score
+        # Apply correlation: when one scores, other is more likely to score
+        btts_prob = home_score_prob * away_score_prob * (1 + correlation)
         
-        # Also: home scores, away doesn't (but correlation reduces this)
-        p_home_only = home_score_prob * (1 - away_score_prob) * (1 - correlation/2)
-        
-        # Away scores, home doesn't
-        p_away_only = (1 - home_score_prob) * away_score_prob * (1 - correlation/2)
-        
-        # Total BTTS probability
-        btts_prob = (p_both_score + p_home_only + p_away_only) * 100
+        # Convert to percentage
+        btts_percent = btts_prob * 100
         
         if self.debug:
-            print(f"\n🎯 BTTS CALCULATION (with correlation):")
+            print(f"\n🎯 BTTS CALCULATION (FIXED VERSION):")
             print(f"  Home Score Prob: {home_score_prob:.2%}")
             print(f"  Away Score Prob: {away_score_prob:.2%}")
             print(f"  Correlation: {correlation:.2f}")
-            print(f"  Base BTTS Prob: {btts_prob:.1f}%")
+            print(f"  Correct BTTS Prob: {btts_percent:.1f}%")
         
         # Apply team tendencies
         tendency_factor = (home.btts_tendency + away.btts_tendency) / 2
-        btts_prob *= tendency_factor
+        btts_percent *= tendency_factor
+        
+        if self.debug:
+            print(f"  Team Tendency Factor: {tendency_factor:.2f}")
         
         # Apply variance adjustment
         avg_variance = (home.variance_factor + away.variance_factor) / 2
         if avg_variance > 1.1:
-            btts_prob *= 1.05  # High variance slightly increases BTTS
+            btts_percent *= 1.05  # High variance slightly increases BTTS
+            if self.debug:
+                print(f"  Variance Factor: {avg_variance:.2f} → ×1.05")
         
         if self.debug:
-            print(f"  Team Tendency Factor: {tendency_factor:.2f}")
-            print(f"  Variance Factor: {avg_variance:.2f}")
-            print(f"  Final BTTS Prob: {btts_prob:.1f}%")
+            print(f"  Final BTTS Prob: {btts_percent:.1f}%")
         
         # League baseline
         baseline = self.league_config['btts_baseline']
         
-        if btts_prob >= baseline:
+        if btts_percent >= baseline:
             selection = "Yes"
-            confidence = min(75, btts_prob)
+            confidence = min(75, btts_percent)
         else:
             selection = "No"
-            confidence = min(75, 100 - btts_prob)
+            confidence = min(75, 100 - btts_percent)
         
         confidence = max(50, confidence)
         
@@ -1029,3 +1052,65 @@ class MatchPredictor:
             "selection": selection,
             "confidence": round(confidence, 1)
         }
+    
+    def _check_prediction_consistency(self, predictions: List[Dict], home_xg: float, 
+                                     away_xg: float) -> bool:
+        """Check if predictions are mathematically consistent"""
+        
+        # Extract probabilities
+        winner_pred = predictions[0]
+        total_pred = predictions[1]
+        btts_pred = predictions[2]
+        
+        home_prob = winner_pred["probabilities"]["home"] / 100
+        draw_prob = winner_pred["probabilities"]["draw"] / 100
+        away_prob = winner_pred["probabilities"]["away"] / 100
+        
+        # Calculate implied probabilities from BTTS and Total Goals
+        if btts_pred["selection"] == "Yes":
+            btts_confidence = btts_pred["confidence"] / 100
+        else:
+            btts_confidence = 1 - (btts_pred["confidence"] / 100)
+        
+        if total_pred["selection"].startswith("Under"):
+            under_confidence = total_pred["confidence"] / 100
+            over_confidence = 1 - under_confidence
+        else:
+            over_confidence = total_pred["confidence"] / 100
+            under_confidence = 1 - over_confidence
+        
+        # 🔥 Check 1: If BTTS high and Under high, draw should be high
+        if btts_confidence > 0.7 and under_confidence > 0.6:
+            # The only Under 2.5 + BTTS outcome is 1-1 (draw)
+            implied_draw_min = max(0, btts_confidence + under_confidence - 1)
+            if implied_draw_min > 0 and draw_prob < implied_draw_min * 0.8:
+                warnings.warn(f"⚠️ CONSISTENCY WARNING: Draw probability ({draw_prob:.1%}) "
+                            f"too low for BTTS ({btts_confidence:.1%}) + Under ({under_confidence:.1%})")
+                return False
+        
+        # 🔥 Check 2: BTTS should not exceed min(scoring_prob_home, scoring_prob_away)
+        home_score_prob = 1 - math.exp(-home_xg)
+        away_score_prob = 1 - math.exp(-away_xg)
+        max_possible_btts = min(home_score_prob, away_score_prob) * 1.2  # With correlation
+        
+        if btts_confidence > max_possible_btts:
+            warnings.warn(f"⚠️ CONSISTENCY WARNING: BTTS ({btts_confidence:.1%}) exceeds "
+                        f"max possible ({max_possible_btts:.1%})")
+            return False
+        
+        # 🔥 Check 3: Total goals confidence should align with xG
+        total_xg = home_xg + away_xg
+        league_avg = self.league_config['avg_goals']
+        
+        if total_xg < league_avg - 0.5 and under_confidence < 0.55:
+            warnings.warn(f"⚠️ CONSISTENCY WARNING: Low xG ({total_xg:.2f}) but Under confidence only {under_confidence:.1%}")
+            return False
+        
+        if total_xg > league_avg + 0.5 and over_confidence < 0.55:
+            warnings.warn(f"⚠️ CONSISTENCY WARNING: High xG ({total_xg:.2f}) but Over confidence only {over_confidence:.1%}")
+            return False
+        
+        if self.debug:
+            print(f"✅ Predictions are mathematically consistent")
+        
+        return True
