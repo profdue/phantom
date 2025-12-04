@@ -1,8 +1,8 @@
 """
-PHANTOM v4.3 - Production Ready Core Models
+PHANTOM v4.4 - Production Ready Core Models
 All mathematical errors fixed. Statistically rigorous.
 ALL FIXES APPLIED: Extreme form, style matrix, variance adjustments
-BTTS FIX APPLIED: Corrected probability calculation
+BTTS FIX APPLIED: Dynamic correlation based on matchup imbalance
 SCORELINE FIX: Added proper scoreline prediction
 """
 import math
@@ -541,7 +541,7 @@ class BayesianShrinker:
         return home_shrunk/total, draw_shrunk/total, away_shrunk/total
 
 class MatchPredictor:
-    """Main prediction engine with ALL FIXES applied"""
+    """Main prediction engine with ALL FIXES applied including dynamic BTTS correlation"""
     
     def __init__(self, league_name: str, league_averages: LeagueAverages, 
                  debug: bool = False):
@@ -595,7 +595,7 @@ class MatchPredictor:
         total_xg = home_xg + away_xg
         total_pred = self._predict_total_goals(total_xg, home_team, away_team)
         
-        # 4. BTTS prediction (FIXED - CORRECTED VERSION)
+        # 4. BTTS prediction (FIXED - WITH DYNAMIC CORRELATION)
         btts_pred = self._predict_btts(home_xg, away_xg, home_team, away_team)
         
         # 5. Scoreline prediction (NEW - Mathematically correct)
@@ -1044,30 +1044,86 @@ class MatchPredictor:
         
         return 0.5
     
+    def _get_dynamic_correlation(self, home_xg: float, away_xg: float,
+                               home: TeamProfile, away: TeamProfile) -> float:
+        """
+        Get dynamic correlation based on matchup imbalance.
+        
+        Football reality:
+        - Even matchups: Positive correlation (teams trade goals)
+        - Extreme mismatches: Negative correlation (dominant team suppresses opponent)
+        
+        Parameters:
+        home_xg: Expected goals for home team
+        away_xg: Expected goals for away team
+        home: Home team profile
+        away: Away team profile
+        
+        Returns:
+        correlation: Dynamic correlation factor (-0.10 to +0.15)
+        """
+        # Calculate xG differential
+        xg_diff = abs(home_xg - away_xg)
+        league_avg = self.league_averages.neutral_baseline
+        
+        # Relative imbalance (how extreme is the mismatch)
+        relative_imbalance = xg_diff / max(0.5, league_avg)
+        
+        # Determine correlation based on imbalance
+        if relative_imbalance > 0.8:  # Extreme mismatch (>80% of league avg)
+            # Negative correlation: dominant team suppresses opponent
+            correlation = -0.10
+            if self.debug:
+                print(f"  Dynamic Correlation: Extreme mismatch (diff={xg_diff:.2f}, "
+                      f"rel={relative_imbalance:.2f}) → correlation={correlation:.2f}")
+        
+        elif relative_imbalance > 0.4:  # Moderate mismatch (40-80% of league avg)
+            # No correlation: neutral
+            correlation = 0.0
+            if self.debug:
+                print(f"  Dynamic Correlation: Moderate mismatch (diff={xg_diff:.2f}, "
+                      f"rel={relative_imbalance:.2f}) → correlation={correlation:.2f}")
+        
+        elif relative_imbalance > 0.2:  # Slight mismatch (20-40% of league avg)
+            # Small positive correlation
+            correlation = 0.05
+            if self.debug:
+                print(f"  Dynamic Correlation: Slight mismatch (diff={xg_diff:.2f}, "
+                      f"rel={relative_imbalance:.2f}) → correlation={correlation:.2f}")
+        
+        else:  # Even matchup (<20% difference)
+            # Standard positive correlation (back-and-forth game)
+            correlation = self.league_config.get('btts_correlation', 0.15)
+            if self.debug:
+                print(f"  Dynamic Correlation: Even matchup (diff={xg_diff:.2f}, "
+                      f"rel={relative_imbalance:.2f}) → correlation={correlation:.2f}")
+        
+        return correlation
+    
     def _predict_btts(self, home_xg: float, away_xg: float,
                      home: TeamProfile, away: TeamProfile) -> Dict:
-        """🔥🔥🔥 FIXED: Predict Both Teams to Score with CORRECTED calculation"""
+        """🔥🔥🔥 FIXED: Predict Both Teams to Score with DYNAMIC correlation"""
         
-        # Base probability from Poisson WITH correlation
+        # Base probability from Poisson
         home_score_prob = 1 - math.exp(-home_xg)
         away_score_prob = 1 - math.exp(-away_xg)
         
-        # Get correlation parameter
-        correlation = self.league_config.get('btts_correlation', 0.15)
+        # 🔥 UPDATED: Get DYNAMIC correlation based on matchup
+        correlation = self._get_dynamic_correlation(home_xg, away_xg, home, away)
         
-        # 🔥🔥🔥 CORRECTED: BTTS = Probability BOTH teams score
-        # Apply correlation: when one scores, other is more likely to score
+        # BTTS = Probability BOTH teams score with correlation
         btts_prob = home_score_prob * away_score_prob * (1 + correlation)
         
         # Convert to percentage
         btts_percent = btts_prob * 100
         
         if self.debug:
-            print(f"\n🎯 BTTS CALCULATION (FIXED VERSION):")
-            print(f"  Home Score Prob: {home_score_prob:.2%}")
-            print(f"  Away Score Prob: {away_score_prob:.2%}")
-            print(f"  Correlation: {correlation:.2f}")
-            print(f"  Correct BTTS Prob: {btts_percent:.1f}%")
+            print(f"\n🎯 BTTS CALCULATION (WITH DYNAMIC CORRELATION):")
+            print(f"  Home xG: {home_xg:.2f} → Score prob: {home_score_prob:.2%}")
+            print(f"  Away xG: {away_xg:.2f} → Score prob: {away_score_prob:.2%}")
+            print(f"  Dynamic Correlation: {correlation:.3f}")
+            print(f"  Base BTTS: {home_score_prob:.2%} × {away_score_prob:.2%} = {(home_score_prob*away_score_prob):.2%}")
+            print(f"  With correlation (×{1+correlation:.3f}): {btts_prob:.2%}")
         
         # Apply team tendencies
         tendency_factor = (home.btts_tendency + away.btts_tendency) / 2
@@ -1084,7 +1140,7 @@ class MatchPredictor:
                 print(f"  Variance Factor: {avg_variance:.2f} → ×1.05")
         
         if self.debug:
-            print(f"  Final BTTS Prob: {btts_percent:.1f}%")
+            print(f"  Final BTTS % before bounds: {btts_percent:.1f}%")
         
         # League baseline
         baseline = self.league_config['btts_baseline']
@@ -1096,6 +1152,7 @@ class MatchPredictor:
             selection = "No"
             confidence = min(75, 100 - btts_percent)
         
+        # Apply reasonable bounds
         confidence = max(50, confidence)
         
         if self.debug:
