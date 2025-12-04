@@ -1,5 +1,5 @@
 """
-PHANTOM v4.5 - Production Ready Core Models
+PHANTOM v4.3 - Production Ready Core Models
 All mathematical errors fixed. Statistically rigorous.
 ALL FIXES APPLIED: 
 1. Extreme form, style matrix, variance adjustments
