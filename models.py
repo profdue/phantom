@@ -1,8 +1,10 @@
 """
-PHANTOM v4.3 - Production Ready Core Models
+PHANTOM v4.5 - Production Ready Core Models
 All mathematical errors fixed. Statistically rigorous.
-ALL FIXES APPLIED: Extreme form, style matrix, variance adjustments
-BTTS FIX APPLIED: Dynamic correlation based on matchup imbalance
+ALL FIXES APPLIED: 
+1. Extreme form, style matrix, variance adjustments
+2. Dynamic correlation based on matchup imbalance
+3. Clean sheet probability boost for extreme mismatches
 SCORELINE FIX: Added proper scoreline prediction
 """
 import math
@@ -541,7 +543,7 @@ class BayesianShrinker:
         return home_shrunk/total, draw_shrunk/total, away_shrunk/total
 
 class MatchPredictor:
-    """Main prediction engine with ALL FIXES applied including dynamic BTTS correlation"""
+    """Main prediction engine with ALL FIXES applied including dynamic BTTS correlation and clean sheet boost"""
     
     def __init__(self, league_name: str, league_averages: LeagueAverages, 
                  debug: bool = False):
@@ -595,7 +597,7 @@ class MatchPredictor:
         total_xg = home_xg + away_xg
         total_pred = self._predict_total_goals(total_xg, home_team, away_team)
         
-        # 4. BTTS prediction (FIXED - WITH DYNAMIC CORRELATION)
+        # 4. BTTS prediction (FIXED - WITH DYNAMIC CORRELATION AND CLEAN SHEET BOOST)
         btts_pred = self._predict_btts(home_xg, away_xg, home_team, away_team)
         
         # 5. Scoreline prediction (NEW - Mathematically correct)
@@ -754,7 +756,7 @@ class MatchPredictor:
             print(f"\n🎲 PURE POISSON PROBABILITIES (with variance):")
             print(f"  Raw: Home={home_win_prob:.2%}, Draw={draw_prob:.2%}, Away={away_win_prob:.2%}")
         
-        # Apply extreme form boosts (FIXED VERSION - preserves draw probability)
+        # Apply extreme form boosts (FIXED VERSION - preserves minimum draw probability)
         home_win_prob, draw_prob, away_win_prob = self._apply_extreme_form_boosts(
             home_win_prob, draw_prob, away_win_prob, home, away
         )
@@ -1045,22 +1047,13 @@ class MatchPredictor:
         return 0.5
     
     def _get_dynamic_correlation(self, home_xg: float, away_xg: float,
-                               home: TeamProfile, away: TeamProfile) -> float:
+                               home: TeamProfile, away: TeamProfile) -> Tuple[float, float]:
         """
-        Get dynamic correlation based on matchup imbalance.
-        
-        Football reality:
-        - Even matchups: Positive correlation (teams trade goals)
-        - Extreme mismatches: Negative correlation (dominant team suppresses opponent)
-        
-        Parameters:
-        home_xg: Expected goals for home team
-        away_xg: Expected goals for away team
-        home: Home team profile
-        away: Away team profile
+        Get dynamic correlation based on matchup imbalance and calculate relative imbalance.
         
         Returns:
         correlation: Dynamic correlation factor (-0.10 to +0.15)
+        relative_imbalance: How extreme the mismatch is (0.0 to 2.0+)
         """
         # Calculate xG differential
         xg_diff = abs(home_xg - away_xg)
@@ -1098,18 +1091,38 @@ class MatchPredictor:
                 print(f"  Dynamic Correlation: Even matchup (diff={xg_diff:.2f}, "
                       f"rel={relative_imbalance:.2f}) → correlation={correlation:.2f}")
         
-        return correlation
+        return correlation, relative_imbalance
     
     def _predict_btts(self, home_xg: float, away_xg: float,
                      home: TeamProfile, away: TeamProfile) -> Dict:
-        """🔥🔥🔥 FIXED: Predict Both Teams to Score with DYNAMIC correlation"""
+        """🔥🔥🔥 FIXED: Predict Both Teams to Score with DYNAMIC CORRELATION & CLEAN SHEET BOOST"""
         
         # Base probability from Poisson
         home_score_prob = 1 - math.exp(-home_xg)
         away_score_prob = 1 - math.exp(-away_xg)
         
-        # 🔥 UPDATED: Get DYNAMIC correlation based on matchup
-        correlation = self._get_dynamic_correlation(home_xg, away_xg, home, away)
+        # 🔥 Get DYNAMIC correlation and relative imbalance
+        correlation, relative_imbalance = self._get_dynamic_correlation(home_xg, away_xg, home, away)
+        
+        # 🔥 CLEAN SHEET PROBABILITY BOOST for extreme mismatches
+        original_home_prob = home_score_prob
+        original_away_prob = away_score_prob
+        
+        if relative_imbalance > 0.8:  # Extreme mismatch
+            if home_xg > away_xg:
+                # Home is dominant - reduce away scoring probability
+                reduction_factor = max(0.7, 1.0 - (relative_imbalance * 0.1))
+                away_score_prob *= reduction_factor
+                if self.debug:
+                    print(f"  Clean Sheet Boost: Home dominant → Away scoring prob ×{reduction_factor:.2f}")
+                    print(f"    Away: {original_away_prob:.1%} → {away_score_prob:.1%}")
+            else:
+                # Away is dominant - reduce home scoring probability
+                reduction_factor = max(0.7, 1.0 - (relative_imbalance * 0.1))
+                home_score_prob *= reduction_factor
+                if self.debug:
+                    print(f"  Clean Sheet Boost: Away dominant → Home scoring prob ×{reduction_factor:.2f}")
+                    print(f"    Home: {original_home_prob:.1%} → {home_score_prob:.1%}")
         
         # BTTS = Probability BOTH teams score with correlation
         btts_prob = home_score_prob * away_score_prob * (1 + correlation)
@@ -1118,9 +1131,12 @@ class MatchPredictor:
         btts_percent = btts_prob * 100
         
         if self.debug:
-            print(f"\n🎯 BTTS CALCULATION (WITH DYNAMIC CORRELATION):")
-            print(f"  Home xG: {home_xg:.2f} → Score prob: {home_score_prob:.2%}")
-            print(f"  Away xG: {away_xg:.2f} → Score prob: {away_score_prob:.2%}")
+            print(f"\n🎯 BTTS CALCULATION (WITH DYNAMIC CORRELATION & CLEAN SHEET BOOST):")
+            print(f"  Home xG: {home_xg:.2f} → Score prob: {original_home_prob:.2%}")
+            print(f"  Away xG: {away_xg:.2f} → Score prob: {original_away_prob:.2%}")
+            if relative_imbalance > 0.8:
+                print(f"  After Clean Sheet Boost:")
+                print(f"    Home: {home_score_prob:.2%}, Away: {away_score_prob:.2%}")
             print(f"  Dynamic Correlation: {correlation:.3f}")
             print(f"  Base BTTS: {home_score_prob:.2%} × {away_score_prob:.2%} = {(home_score_prob*away_score_prob):.2%}")
             print(f"  With correlation (×{1+correlation:.3f}): {btts_prob:.2%}")
